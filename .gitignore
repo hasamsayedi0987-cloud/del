@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+.turbo/
+
+# Expo / React Native
+.expo/
+ios/Pods/
+android/.gradle/
+android/app/build/
+*.keystore
+!debug.keystore
+
+# Electron
+release/
+
+# Environment — NEVER commit real secrets
+.env
+.env.*
+!.env.example
+
+# Coverage & test
+coverage/
+playwright-report/
+test-results/
+
+# IDE
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local databases / media for dev
+*.sqlite
+*.db
+data/minio/
+data/postgres/
+data/redis/

@@ -1,0 +1,69 @@
+# محیط توسعه محلی دل — postgres + redis + minio
+# Usage: docker compose -f infrastructure/docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: del-postgres
+    environment:
+      POSTGRES_USER: del_user
+      POSTGRES_PASSWORD: del_dev_password   # فقط برای توسعه محلی
+      POSTGRES_DB: del
+    ports:
+      - "5432:5432"
+    volumes:
+      - del_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U del_user -d del"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: del-redis
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - del_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: del-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: del_minio
+      MINIO_ROOT_PASSWORD: del_dev_minio_password   # فقط برای توسعه محلی
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - del_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ساخت خودکار bucket پیش‌فرض
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 del_minio del_dev_minio_password &&
+      mc mb --ignore-existing local/del-media &&
+      echo 'bucket del-media ready'"
+
+volumes:
+  del_pgdata:
+  del_redisdata:
+  del_miniodata:
