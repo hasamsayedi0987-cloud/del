@@ -164,6 +164,17 @@ async function main() {
   const forbidden = await api('GET', `/conversations/${convId}/messages`, { token: C.accessToken });
   check('غیرعضو → 403', forbidden.status === 403 && forbidden.data.error.code === 'NOT_A_PARTICIPANT');
 
+  const wsC = await connectWs(C.accessToken);
+  await sleep(200);
+  const joinDenied = await new Promise((resolve) => {
+    wsC.timeout(5000).emit('conversation.join', { conversationId: convId }, (e, r) => resolve(r));
+  });
+  check('join غیرعضو رد شد', joinDenied && joinDenied.ok === false && joinDenied.error?.code === 'NOT_A_PARTICIPANT', JSON.stringify(joinDenied));
+  const joinOk = await new Promise((resolve) => {
+    wsB.timeout(5000).emit('conversation.join', { conversationId: convId }, (e, r) => resolve(r));
+  });
+  check('join عضو موفق', joinOk && joinOk.ok === true);
+
   // ۱۰) WS با توکن نامعتبر → قطع
   console.log('۱۰) WS با توکن نامعتبر');
   const badWs = await new Promise((resolve) => {
@@ -175,8 +186,20 @@ async function main() {
   });
   check('WS نامعتبر قطع شد', badWs === true || badWs === 'disconnected');
 
+  // ۱۱) مکالمه تازه برای کاربر آنلاین (conversation.new)
+  console.log('۱۱) اطلاع‌رسانی مکالمه تازه به کاربر آنلاین');
+  const convNewPromise = waitForEvent(wsB, 'conversation.new');
+  const convBC = await api('POST', '/conversations', { token: C.accessToken, body: { userId: B.user.id } });
+  const convNew = await convNewPromise;
+  check(
+    'B رویداد conversation.new گرفت',
+    convNew && convNew.conversationId === convBC.data.id && convNew.participantUserIds.includes(B.user.id),
+    JSON.stringify(convNew),
+  );
+
   wsA.disconnect();
   wsB.disconnect();
+  wsC.disconnect();
 
   console.log(`\n——— نتیجه: ${PASS.length} سبز / ${FAIL.length} قرمز ———`);
   if (FAIL.length) {

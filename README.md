@@ -32,10 +32,10 @@
 
 - **مدل داده:** `Conversation` / `Participant` / `Message` با `server_seq` یگانه (تخصیص اتمیک) و `client_msg_id` یگانه (تحویل idempotent) + مهاجرت Prisma
 - **REST:** ساخت مکالمه idempotent، لیست با unreadCount، تاریخچه با cursor، ارسال idempotent، markRead، جستجوی کاربر با شماره
-- **WebSocket (Socket.IO):** auth با JWT در handshake، اتاق مکالمه‌ای، رویدادهای `message.send` / `message.new` / `conversation.updated`
+- **WebSocket (Socket.IO):** auth با JWT در handshake، اتاق مکالمه‌ای + اتاق شخصی کاربر، رویدادهای `message.send` / `message.new` / `conversation.updated` / `conversation.join` / `conversation.new` (اطلاع‌رسانی مکالمه تازه به کاربر آنلاین)
 - **موبایل:** صفحه گفتگوها (لیست + نشان نخوانده + گفتگوی جدید با شماره) و صفحه چت (حباب RTL، ارسال خوش‌بینانه، fallback REST، صفحه‌بندی قدیمی‌تر)
 - **دسکتاپ:** همان جریان چت بلادرنگ در Electron
-- **تست دود ۱۸ سناریویی** — `scripts/smoke-step2.js` (دو کاربر واقعی از ورود تا ارسال/دریافت بلادرنگ و امنیت) — ۱۸/۱۸ سبز
+- **تست دود ۲۱ سناریویی** — `scripts/smoke-step2.js` (دو کاربر واقعی از ورود تا ارسال/دریافت بلادرنگ، امنیت اتاق‌ها و اطلاع‌رسانی مکالمه تازه) — ۲۱/۲۱ سبز
 
 ## پشته فناوری
 

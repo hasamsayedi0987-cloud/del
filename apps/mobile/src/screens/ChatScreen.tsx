@@ -65,6 +65,8 @@ export function ChatScreen({
     })();
 
     const s = getSocket();
+    // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
+    s?.emit('conversation.join', { conversationId: convId });
     const onNew = (payload: WsMessageNew) => {
       if (payload.conversationId !== convId) return;
       upsert(payload.message);

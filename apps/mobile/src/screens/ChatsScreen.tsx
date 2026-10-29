@@ -5,7 +5,7 @@ import { getSocket } from '../socket';
 import { theme } from '../theme';
 import { Button, Logo, Screen, Subtitle, Title } from '../components/ui';
 import { faError } from './LoginPhoneScreen';
-import type { ConversationDto, WsConversationUpdated } from '@del/shared-types';
+import type { ConversationDto, WsConversationNew, WsConversationUpdated } from '@del/shared-types';
 
 export function ChatsScreen({
   accessToken,
@@ -45,9 +45,15 @@ export function ChatsScreen({
     const onUpdate = (payload: WsConversationUpdated) => {
       void refresh();
     };
+    // گفتگوی تازه‌ساخته‌شده (مثلاً طرف مقابل شروع کرد) → رفرش لیست
+    const onNewConv = (_payload: WsConversationNew) => {
+      void refresh();
+    };
     s?.on('conversation.updated', onUpdate);
+    s?.on('conversation.new', onNewConv);
     return () => {
       s?.off('conversation.updated', onUpdate);
+      s?.off('conversation.new', onNewConv);
     };
   }, [refresh]);
 

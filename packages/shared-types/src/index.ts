@@ -105,3 +105,10 @@ export interface WsConversationUpdated {
   lastSeq: number;
   lastMessageAt: string;
 }
+
+/** مکالمه تازه برای کاربر آنلاین ساخته شد — کلاینت لیست را رفرش می‌کند */
+export interface WsConversationNew {
+  conversationId: string;
+  /** اعضای مکالمه (برای multi-device و اشکال‌زدایی) */
+  participantUserIds: string[];
+}

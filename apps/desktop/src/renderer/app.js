@@ -135,6 +135,12 @@ function connectWs(token) {
         method: 'POST', token: session.accessToken, body: { lastReadSeq: message.serverSeq },
       }).catch(() => {});
     }
+    // پیش‌نمایش/شمارنده لیست هم به‌روز شود
+    void renderChatList();
+  });
+  // گفتگوی تازه‌ساخته‌شده توسط کاربر دیگر → رفرش لیست
+  socket.on('conversation.new', () => {
+    void renderChatList();
   });
 }
 
@@ -209,7 +215,8 @@ async function openChat(conv) {
   show('chat');
   $('msgInput').focus();
   await loadHistory();
-  socket?.emit('join', { conversationId: conv.id }); // برای سازگاری آینده؛ اتاق‌ها هنگام اتصال ست می‌شوند
+  // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
+  socket?.emit('conversation.join', { conversationId: conv.id });
 }
 
 async function loadHistory(before) {

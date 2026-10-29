@@ -35,8 +35,9 @@
 
 - **Handshake:** `io(URL, { auth: { token: <accessToken> } })` — توکن نامعتبر فوراً قطع می‌شود
 - **اتاق‌ها:** هر اتصال هنگام connect به اتاق همه مکالمه‌های کاربر (`conv:{id}`) join می‌شود
-- **کلاینت → سرور:** `message.send` `{conversationId, clientMsgId, body}` با ack `{ok, message, duplicate}`
-- **سرور → کلاینت:** `message.new` و `conversation.updated` (broadcast به همه اعضا شامل فرستنده؛ کلاینت با clientMsgId dedupe می‌کند)
+- **کلاینت → سرور:** `message.send` `{conversationId, clientMsgId, body}` با ack `{ok, message, duplicate}` و `conversation.join` `{conversationId}` با ack `{ok}` / `{ok:false, error:{code:'NOT_A_PARTICIPANT'}}`
+- **سرور → کلاینت:** `message.new` و `conversation.updated` (broadcast به همه اعضا شامل فرستنده؛ کلاینت با clientMsgId dedupe می‌کند) و `conversation.new` (به اتاق شخصی `user:{id}` هر عضو مکالمه تازه — کلاینت لیست گفتگوها را رفرش می‌کند)
+- اتاق‌های مکالمه هنگام اتصال بر اساس عضویت‌های فعلی ست می‌شوند؛ برای مکالمه‌های ساخته‌شده پس از اتصال، کلاینت هنگام بازکردن چت `conversation.join` می‌فرستد (عضویت سمت سرور اعتبارسنجی می‌شود)
 - گسترش چندنودی با Redis adapter از گام عملیاتی (فعلاً تک‌نود)
 
 ## ۵. تخصیص serverSeq
@@ -48,9 +49,9 @@
 - **موبایل:** `ChatsScreen` (لیست با نشان نخوانده + گفتگوی جدید با شماره) و `ChatScreen` (حباب‌های RTL، ارسال خوش‌بینانه با وضعیت «در حال ارسال/نشد»، اتصال WS با fallback خودکار به REST، «بارگذاری قدیمی‌تر» با cursor)
 - **دسکتاپ:** همان جریان در Electron (socket.io client به‌صورت فایل محلی vendor شده تا CSP نقض نشود) + نشانگر وضعیت اتصال بلادرنگ
 
-## ۷. نتایج تست دود (۱۸/۱۸)
+## ۷. نتایج تست دود (۲۱/۲۱)
 
-ورود دو کاربر · جستجوی شماره · مکالمه یکتا · اتصال WS · ارسال WS با ack · دریافت بلادرنگ B · echo فرستنده · seq=1 · ارسال تکراری duplicate=true بدون broadcast اضافه · REST 201 · دریافت بلادرنگ مسیر REST · صفحه‌بندی ۲ صفحه بدون همپوشانی صعودی · unreadCount ۷→۰ · ۴۰۳ غیرعضو · قطع WS با توکن نامعتبر.
+ورود دو کاربر · جستجوی شماره · مکالمه یکتا · اتصال WS · ارسال WS با ack · دریافت بلادرنگ B · echo فرستنده · seq=1 · ارسال تکراری duplicate=true بدون broadcast اضافه · REST 201 · دریافت بلادرنگ مسیر REST · صفحه‌بندی ۲ صفحه بدون همپوشانی صعودی · unreadCount ۷→۰ · ۴۰۳ غیرعضو · رد join غیرعضو / پذیرش join عضو · قطع WS با توکن نامعتبر · رویداد conversation.new برای کاربر آنلاین.
 
 ## ۸. محدودیت‌های شناخته‌شده
 

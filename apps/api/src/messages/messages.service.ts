@@ -98,6 +98,11 @@ export class MessagesService {
         },
       },
     });
+    // اطلاع‌رسانی به کاربران آنلاین (اتاق شخصی) تا لیست گفتگوهایشان رفرش شود
+    this.events.emit('conversation.created', {
+      conversationId: conv.id,
+      userIds: [meId, otherUserId],
+    });
     return this.getOne(meId, conv.id);
   }
 
