@@ -50,3 +50,10 @@ npm-debug.log*
 data/minio/
 data/postgres/
 data/redis/
+
+# Alpha build artifacts (web copies inside shells)
+apps/mobile/www/
+apps/desktop/www/
+apps/mobile/android/local.properties
+apps/api/bundle/
+*.AppImage

@@ -1,0 +1,47 @@
+appId: com.delchat.del.desktop
+productName: Del
+copyright: Del Messenger
+
+directories:
+  output: release
+  buildResources: .
+
+files:
+  - dist/**/*
+  - www/**/*
+  - package.json
+
+icon: icon.png
+
+win:
+  icon: icon.ico
+  artifactName: ${productName}-${version}-windows-${arch}-setup.${ext}
+  target:
+    - nsis
+    - zip
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: دل — Del
+  artifactName: ${productName}-${version}-windows-${arch}-setup.${ext}
+
+linux:
+  icon: icon.png
+  category: Network;InstantMessaging
+  target:
+    - AppImage
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  desktop:
+    Name: دل — Del
+    Comment: پیام‌رسان امن چندسکویی
+
+mac:
+  icon: icon.png
+  category: public.app-category.social-networking
+  target:
+    - dmg
+  artifactName: ${productName}-${version}-macos-${arch}.${ext}

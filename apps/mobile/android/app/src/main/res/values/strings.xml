@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">دل</string>
+    <string name="title_activity_main">دل</string>
+    <string name="package_name">com.delchat.del</string>
+    <string name="custom_url_scheme">com.delchat.del</string>
+</resources>
