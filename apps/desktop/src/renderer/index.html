@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; connect-src 'self' http: https:; style-src 'self'; script-src 'self'" />
+        content="default-src 'self'; connect-src 'self' http: https: ws: wss:; style-src 'self'; script-src 'self'" />
   <title>دل</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -37,10 +37,42 @@
     <button id="backToPhone" class="ghost">تغییر شماره</button>
   </section>
 
-  <!-- صحنه ۳: خانه -->
-  <section id="screen-home" class="screen">
+  <!-- صحنه ۳: گفتگوها -->
+  <section id="screen-chats" class="screen">
+    <div class="topbar">
+      <button id="goProfile" class="link">پروفایل</button>
+      <h2>گفتگوها</h2>
+      <button id="newChat" class="link accent">+ جدید</button>
+    </div>
+    <div id="chatList" class="list"></div>
+    <div class="status-row">
+      <span id="wsDot" class="dot"></span><span id="wsText">اتصال بلادرنگ…</span>
+    </div>
+  </section>
+
+  <!-- صحنه ۴: چت -->
+  <section id="screen-chat" class="screen">
+    <div class="topbar">
+      <button id="chatBack" class="link">‹ بازگشت</button>
+      <h2 id="chatTitle">گفتگو</h2>
+      <span></span>
+    </div>
+    <button id="loadOlder" class="ghost small-btn hidden">پیام‌های قدیمی‌تر…</button>
+    <div id="msgList" class="msg-list"></div>
+    <div class="composer">
+      <input id="msgInput" type="text" placeholder="پیام…" />
+      <button id="sendMsg" class="primary send">ارسال</button>
+    </div>
+  </section>
+
+  <!-- صحنه ۵: پروفایل -->
+  <section id="screen-profile" class="screen">
+    <div class="topbar">
+      <button id="profileBack" class="link">‹ بازگشت</button>
+      <h2>پروفایل</h2>
+      <span></span>
+    </div>
     <h1 id="hello">سلام 👋</h1>
-    <p class="sub">«گام ۱» پروژه دل — زیرساخت احراز هویت آماده است</p>
 
     <div class="card">
       <div class="row"><span class="lbl">شماره</span><span id="mePhone" class="val"></span></div>
@@ -60,6 +92,19 @@
     <button id="logout" class="danger">خروج از حساب</button>
   </section>
 
+  <!-- گفتگوی گفتگوی جدید -->
+  <div id="newChatModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h1>گفتگوی جدید</h1>
+      <p class="sub">شماره موبایل طرف مقابل را وارد کنید</p>
+      <input id="newChatPhone" type="tel" placeholder="۰۹۱۲ ۱۲۳ ۴۵۶۷" />
+      <div id="newChatError" class="error"></div>
+      <button id="newChatStart" class="primary">شروع گفتگو</button>
+      <button id="newChatCancel" class="ghost">انصراف</button>
+    </div>
+  </div>
+
+  <script src="vendor/socket.io.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

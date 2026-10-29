@@ -21,8 +21,10 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  devices       Device[]
-  refreshTokens RefreshToken[]
+  devices        Device[]
+  refreshTokens  RefreshToken[]
+  participations Participant[]
+  messages       Message[]
 }
 
 model Device {
@@ -67,4 +69,55 @@ model RefreshToken {
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+}
+
+// ————— پیام‌رسانی (گام ۲) —————
+// قرارداد: هر پیام server_seq یگانه در مکالمه دارد؛ client_msg_id برای idempotency
+
+model Conversation {
+  id            String    @id @default(uuid()) @db.Uuid
+  type          String    @default("direct") // direct | group (گروه در گام بعدی)
+  title         String?
+  lastSeq       Int       @default(0)
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  participants Participant[]
+  messages     Message[]
+
+  @@index([lastMessageAt])
+}
+
+model Participant {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @db.Uuid
+  userId         String   @db.Uuid
+  lastReadSeq    Int      @default(0)
+  joinedAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @db.Uuid
+  senderId       String    @db.Uuid
+  serverSeq      Int
+  clientMsgId    String // UUID تولیدشده سمت کلاینت — تضمین تحویل idempotent
+  type           String    @default("text") // text (رسانه در گام ۴)
+  body           String
+  createdAt      DateTime  @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id])
+
+  @@unique([conversationId, serverSeq])
+  @@unique([conversationId, clientMsgId])
+  @@index([conversationId, serverSeq])
 }

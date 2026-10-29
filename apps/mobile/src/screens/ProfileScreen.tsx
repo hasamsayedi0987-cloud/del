@@ -5,16 +5,18 @@ import { theme } from '../theme';
 import { Button, Card, Screen, Subtitle, Title } from '../components/ui';
 import type { UserDto } from '@del/shared-types';
 
-export function HomeScreen({
+export function ProfileScreen({
   user,
   accessToken,
   onUpdated,
   onLogout,
+  onBack,
 }: {
   user: UserDto;
   accessToken: string;
   onUpdated: (u: UserDto) => void;
   onLogout: () => void;
+  onBack: () => void;
 }) {
   const [name, setName] = useState(user.displayName ?? '');
   const [saving, setSaving] = useState(false);
@@ -33,8 +35,11 @@ export function HomeScreen({
 
   return (
     <Screen>
+      <Text style={styles.back} onPress={onBack}>
+        ‹ بازگشت به گفتگوها
+      </Text>
       <Title>{`سلام ${user.displayName ?? 'کاربر'} 👋`}</Title>
-      <Subtitle>حساب شما ساخته شد. این «گام ۱» پروژه دل است: زیرساخت احراز هویت.</Subtitle>
+      <Subtitle>پروفایل شما در دل — گام ۲: پیام‌رسانی بلادرنگ</Subtitle>
 
       <Card>
         <Row label="شماره" value={toFaDigits(user.phone)} />
@@ -76,6 +81,11 @@ function toFaDigits(s: string): string {
 }
 
 const styles = StyleSheet.create({
+  back: {
+    color: theme.accent,
+    fontSize: 14,
+    marginBottom: 8,
+  },
   row: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',

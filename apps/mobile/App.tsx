@@ -2,17 +2,22 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { StatusBar, View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from './src/api';
+import { connectSocket, disconnectSocket } from './src/socket';
 import { theme } from './src/theme';
 import { LoginPhoneScreen } from './src/screens/LoginPhoneScreen';
 import { LoginOtpScreen } from './src/screens/LoginOtpScreen';
-import { HomeScreen } from './src/screens/HomeScreen';
-import type { AuthSession, UserDto } from '@del/shared-types';
+import { ChatsScreen } from './src/screens/ChatsScreen';
+import { ChatScreen } from './src/screens/ChatScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
+import type { AuthSession, ConversationDto, UserDto } from '@del/shared-types';
 
 type Route =
   | { name: 'boot' }
   | { name: 'login-phone' }
   | { name: 'login-otp'; phone: string }
-  | { name: 'home'; user: UserDto };
+  | { name: 'chats' }
+  | { name: 'chat'; conversation: ConversationDto }
+  | { name: 'profile' };
 
 const KEYS = {
   access: 'del.accessToken',
@@ -24,8 +29,9 @@ export default function App() {
   const [route, setRoute] = useState<Route>({ name: 'boot' });
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
+  const [user, setUser] = useState<UserDto | null>(null);
 
-  // بوت: اگر نشست ذخیره‌شده وجود دارد، سعی در بازیابی
+  // بوت: بازیابی نشست ذخیره‌شده
   useEffect(() => {
     (async () => {
       try {
@@ -35,10 +41,12 @@ export default function App() {
           SecureStore.getItemAsync(KEYS.user),
         ]);
         if (a && userJson) {
-          const user = JSON.parse(userJson) as UserDto;
+          const u = JSON.parse(userJson) as UserDto;
           setAccessToken(a);
           setRefreshToken(r);
-          setRoute({ name: 'home', user });
+          setUser(u);
+          connectSocket(a);
+          setRoute({ name: 'chats' });
           return;
         }
       } catch {
@@ -51,15 +59,16 @@ export default function App() {
   const persistSession = useCallback(async (session: AuthSession) => {
     setAccessToken(session.accessToken);
     setRefreshToken(session.refreshToken);
+    setUser(session.user);
     await SecureStore.setItemAsync(KEYS.access, session.accessToken);
     await SecureStore.setItemAsync(KEYS.refresh, session.refreshToken);
     await SecureStore.setItemAsync(KEYS.user, JSON.stringify(session.user));
+    connectSocket(session.accessToken);
   }, []);
 
   const logout = useCallback(async () => {
-    if (refreshToken) {
-      await api.logout(refreshToken).catch(() => undefined);
-    }
+    if (refreshToken) await api.logout(refreshToken).catch(() => undefined);
+    disconnectSocket();
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.access),
       SecureStore.deleteItemAsync(KEYS.refresh),
@@ -67,8 +76,23 @@ export default function App() {
     ]).catch(() => undefined);
     setAccessToken(null);
     setRefreshToken(null);
+    setUser(null);
     setRoute({ name: 'login-phone' });
   }, [refreshToken]);
+
+  const sessionExpired = useCallback(async () => {
+    // تلاش یک‌باره برای رفرش، وگرنه خروج
+    if (!refreshToken) {
+      await logout();
+      return;
+    }
+    try {
+      const session = await api.refresh(refreshToken);
+      await persistSession(session);
+    } catch {
+      await logout();
+    }
+  }, [refreshToken, logout, persistSession]);
 
   return (
     <View style={styles.root}>
@@ -82,17 +106,35 @@ export default function App() {
           phone={route.phone}
           onVerified={async (session) => {
             await persistSession(session);
-            setRoute({ name: 'home', user: session.user });
+            setRoute({ name: 'chats' });
           }}
           onBack={() => setRoute({ name: 'login-phone' })}
         />
       )}
-      {route.name === 'home' && (
-        <HomeScreen
-          user={route.user}
-          accessToken={accessToken ?? ''}
-          onUpdated={(user) => setRoute({ name: 'home', user })}
+      {route.name === 'chats' && accessToken && user && (
+        <ChatsScreen
+          accessToken={accessToken}
+          myUserId={user.id}
+          onOpenChat={(conversation) => setRoute({ name: 'chat', conversation })}
+          onOpenProfile={() => setRoute({ name: 'profile' })}
+          onSessionExpired={sessionExpired}
+        />
+      )}
+      {route.name === 'chat' && accessToken && user && (
+        <ChatScreen
+          accessToken={accessToken}
+          myUserId={user.id}
+          conversation={route.conversation}
+          onBack={() => setRoute({ name: 'chats' })}
+        />
+      )}
+      {route.name === 'profile' && accessToken && user && (
+        <ProfileScreen
+          user={user}
+          accessToken={accessToken}
+          onUpdated={(u) => setUser(u)}
           onLogout={logout}
+          onBack={() => setRoute({ name: 'chats' })}
         />
       )}
     </View>

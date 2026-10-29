@@ -1,5 +1,11 @@
 import { API_BASE_URL } from './config';
-import type { AuthSession, RequestOtpResponse, UserDto } from '@del/shared-types';
+import type {
+  AuthSession,
+  ConversationDto,
+  MessageDto,
+  RequestOtpResponse,
+  UserDto,
+} from '@del/shared-types';
 
 /** خطای استاندارد API */
 export class ApiError extends Error {
@@ -79,6 +85,49 @@ export const api = {
       method: 'PATCH',
       token,
       body: JSON.stringify(patch),
+    }),
+
+  // ————— پیام‌رسانی (گام ۲) —————
+
+  /** یافتن کاربر با شماره موبایل — برای شروع گفتگوی جدید */
+  findUserByPhone: (token: string, phone: string) =>
+    request<{ id: string; displayName: string | null; phone: string }>(
+      `/users/by-phone/${encodeURIComponent(phone)}`,
+      { token },
+    ),
+
+  createConversation: (token: string, userId: string) =>
+    request<ConversationDto>('/conversations', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ userId }),
+    }),
+
+  listConversations: (token: string) =>
+    request<ConversationDto[]>('/conversations', { token }),
+
+  getMessages: (token: string, conversationId: string, before?: number) =>
+    request<{ messages: MessageDto[]; hasMore: boolean; nextBefore: number | null }>(
+      `/conversations/${conversationId}/messages${before !== undefined ? `?before=${before}` : ''}`,
+      { token },
+    ),
+
+  sendMessageRest: (
+    token: string,
+    conversationId: string,
+    clientMsgId: string,
+    body: string,
+  ) =>
+    request<{ message: MessageDto; duplicate: boolean }>(
+      `/conversations/${conversationId}/messages`,
+      { method: 'POST', token, body: JSON.stringify({ clientMsgId, body }) },
+    ),
+
+  markRead: (token: string, conversationId: string, lastReadSeq: number) =>
+    request<void>(`/conversations/${conversationId}/read`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ lastReadSeq }),
     }),
 };
 
