@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Text,
   TextInput,
@@ -9,11 +12,14 @@ import {
   View,
   StyleSheet,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { api } from '../api';
+import { getSignedUrl, uploadMedia } from '../media';
 import { getSocket, uuid } from '../socket';
 import { theme } from '../theme';
 import type {
   ConversationDto,
+  MediaAssetDto,
   MessageDto,
   ParticipantDto,
   PresenceDto,
@@ -26,6 +32,30 @@ import type {
 
 interface LocalMsg extends MessageDto {
   status?: 'sending' | 'sent' | 'failed';
+  /** برچسب موقت برای حباب آپلود رسانه */
+  pendingLabel?: string;
+}
+
+/** حباب خطادار ساده برای fallback آپلود */
+function optimisticFail(
+  clientMsgId: string,
+  conversationId: string,
+  senderId: string,
+): LocalMsg {
+  return {
+    id: clientMsgId,
+    conversationId,
+    senderId,
+    serverSeq: Number.MAX_SAFE_INTEGER,
+    clientMsgId,
+    type: 'image',
+    body: '',
+    media: null,
+    createdAt: new Date().toISOString(),
+    editedAt: null,
+    deletedAt: null,
+    status: 'failed',
+  };
 }
 
 export function ChatScreen({
@@ -42,6 +72,7 @@ export function ChatScreen({
   const [messages, setMessages] = useState<LocalMsg[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState('');
+  const [uploading, setUploading] = useState(false);
   const listRef = useRef<FlatList<LocalMsg>>(null);
 
   // ————— گام ۴: گروه‌ها — جزئیات کامل (اعضا + نقش‌ها) —————
@@ -211,6 +242,94 @@ export function ChatScreen({
     };
   }, [accessToken, convId, peerId, upsert, isGroup, myUserId, senderName]);
 
+  /** ارسال پیام رسانه‌ای — آپلود مستقیم به S3 سپس پیام با mediaId */
+  const sendMedia = useCallback(async () => {
+    if (uploading) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('دسترسی لازم است', 'برای ارسال عکس، دسترسی گالری را تأیید کنید.');
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 0.8,
+        allowsMultipleSelection: false,
+      });
+      if (picked.canceled || !picked.assets[0]) return;
+      const asset = picked.assets[0];
+      const mime = asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
+      const name = asset.fileName ?? `del-${Date.now()}.${mime.split('/')[1] ?? 'bin'}`;
+
+      setUploading(true);
+      const clientMsgId = uuid();
+      // حباب موقت تا پایان آپلود
+      upsert({
+        id: clientMsgId,
+        conversationId: convId,
+        senderId: myUserId,
+        serverSeq: Number.MAX_SAFE_INTEGER,
+        clientMsgId,
+        type: 'image',
+        body: '',
+        media: null,
+        createdAt: new Date().toISOString(),
+        editedAt: null,
+        deletedAt: null,
+        status: 'sending',
+        pendingLabel: asset.type === 'video' ? 'در حال ارسال ویدیو…' : 'در حال ارسال عکس…',
+      });
+
+      try {
+        const media = await uploadMedia(accessToken, convId, {
+          uri: asset.uri,
+          mime,
+          size: asset.fileSize ?? 0,
+          name,
+          width: asset.width,
+          height: asset.height,
+        });
+        const caption = draft.trim();
+        setDraft('');
+        const s = getSocket();
+        if (s?.connected) {
+          s.timeout(15000).emit(
+            'message.send',
+            { conversationId: convId, clientMsgId, mediaId: media.id, ...(caption ? { body: caption } : {}) },
+            (err: unknown, ack?: { ok: boolean; message?: MessageDto }) => {
+              if (!err && ack?.ok && ack.message) {
+                upsert({ ...ack.message, status: 'sent' });
+              } else {
+                upsert({ ...optimisticFail(clientMsgId, convId, myUserId) });
+              }
+            },
+          );
+        } else {
+          const r = await api.sendMessageRest(accessToken, convId, clientMsgId, caption || undefined, media.id);
+          upsert({ ...r.message, status: 'sent' });
+        }
+      } catch {
+        upsert({
+          id: clientMsgId,
+          conversationId: convId,
+          senderId: myUserId,
+          serverSeq: Number.MAX_SAFE_INTEGER,
+          clientMsgId,
+          type: 'image',
+          body: '',
+          media: null,
+          createdAt: new Date().toISOString(),
+          editedAt: null,
+          deletedAt: null,
+          status: 'failed',
+        });
+        Alert.alert('خطا', 'آپلود فایل ناموفق بود.');
+      }
+    } finally {
+      setUploading(false);
+    }
+  }, [uploading, accessToken, convId, myUserId, draft, upsert]);
+
   const send = useCallback(async () => {
     const body = draft.trim();
     if (!body) return;
@@ -337,8 +456,13 @@ export function ChatScreen({
             <View style={[styles.bubbleRow, mine ? { justifyContent: 'flex-start' } : { justifyContent: 'flex-end' }]}>
               <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePeer]}>
                 {from ? <Text style={styles.senderName}>{from}</Text> : null}
-                <Text style={styles.bubbleText}>{item.body}</Text>
-                {mine && item.status === 'sending' ? <Text style={styles.status}>… در حال ارسال</Text> : null}
+                {item.media ? (
+                  <MediaBubble token={accessToken} media={item.media} mine={mine} />
+                ) : null}
+                {item.body ? <Text style={styles.bubbleText}>{item.body}</Text> : null}
+                {mine && item.status === 'sending' ? (
+                  <Text style={styles.status}>{item.pendingLabel ?? '… در حال ارسال'}</Text>
+                ) : null}
                 {mine && item.status === 'failed' ? <Text style={styles.statusFailed}>✗ ارسال نشد</Text> : null}
                 {mine && item.status === 'sent' ? (
                   <Text style={styles.ticks}>{read ? '✓✓' : '✓'}</Text>
@@ -350,6 +474,14 @@ export function ChatScreen({
       />
 
       <View style={styles.composer}>
+        <TouchableOpacity
+          style={styles.attachBtn}
+          onPress={sendMedia}
+          disabled={uploading}
+          accessibilityLabel="ارسال عکس یا ویدیو"
+        >
+          <Text style={styles.attachIcon}>{uploading ? '…' : '📎'}</Text>
+        </TouchableOpacity>
         <TextInput
           value={draft}
           onChangeText={onChangeDraft}
@@ -416,6 +548,35 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: theme.border,
   },
+  attachBtn: {
+    backgroundColor: theme.surface,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  attachIcon: { fontSize: 18 },
+  mediaImage: {
+    width: 220,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  mediaPlaceholder: { aspectRatio: 4 / 3 },
+  mediaFallback: { color: theme.textDim, fontSize: 13, paddingVertical: 8 },
+  attachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 10,
+    padding: 8,
+    minWidth: 160,
+  },
+  attachRowIcon: { fontSize: 22 },
+  attachRowText: { flexShrink: 1 },
+  attachRowName: { color: '#EAF6FF', fontSize: 13, fontWeight: '700' },
+  attachRowSize: { color: theme.textDim, fontSize: 11, marginTop: 2 },
   input: {
     flex: 1,
     backgroundColor: theme.surface,
@@ -455,4 +616,78 @@ function faRelative(iso: string): string {
 /** عدد فارسی */
 function faNum(n: number): string {
   return String(n).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)] ?? d);
+}
+
+// ————— گام ۵: حباب رسانه — تصویر درون‌خطی، ویدیو/فایل ردیف پیوست —————
+
+function MediaBubble({
+  token,
+  media,
+  mine,
+}: {
+  token: string;
+  media: MediaAssetDto;
+  mine: boolean;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (media.kind === 'image') {
+      setFailed(false);
+      getSignedUrl(token, media.id, 'original')
+        .then((u) => {
+          if (!cancelled) setUrl(u);
+        })
+        .catch(() => {
+          if (!cancelled) setFailed(true);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [token, media.id, media.kind]);
+
+  const openOriginal = useCallback(async () => {
+    try {
+      const u = await getSignedUrl(token, media.id, 'original');
+      await Linking.openURL(u);
+    } catch {
+      // بی‌صدا — URL شاید منقضی شده باشد
+    }
+  }, [token, media.id]);
+
+  if (media.kind === 'image') {
+    if (failed) {
+      return <Text style={styles.mediaFallback}>نمایش عکس ممکن نشد</Text>;
+    }
+    if (!url) {
+      return <View style={[styles.mediaImage, styles.mediaPlaceholder]} />;
+    }
+    const ratio = media.width && media.height ? media.width / media.height : 4 / 3;
+    return (
+      <TouchableOpacity activeOpacity={0.9} onPress={openOriginal}>
+        <Image
+          source={{ uri: url }}
+          style={[styles.mediaImage, { aspectRatio: ratio }]}
+          resizeMode="cover"
+        />
+      </TouchableOpacity>
+    );
+  }
+
+  // ویدیو / صوت / فایل — ردیف پیوست با نام و اندازه
+  const icon = media.kind === 'video' ? '🎬' : media.kind === 'audio' ? '🎵' : '📄';
+  return (
+    <TouchableOpacity style={styles.attachRow} onPress={openOriginal} activeOpacity={0.8}>
+      <Text style={styles.attachRowIcon}>{icon}</Text>
+      <View style={styles.attachRowText}>
+        <Text style={styles.attachRowName} numberOfLines={1}>
+          {media.originalName ?? 'فایل'}
+        </Text>
+        <Text style={styles.attachRowSize}>{faNum(Math.max(1, Math.round(media.size / 1024)))} کیلوبایت — باز کردن</Text>
+      </View>
+    </TouchableOpacity>
+  );
 }

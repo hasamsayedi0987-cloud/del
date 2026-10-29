@@ -2,8 +2,11 @@ import { API_BASE_URL } from './config';
 import type {
   AuthSession,
   ConversationDto,
+  MediaAssetDto,
+  MediaUrlResponse,
   MessageDto,
   PresenceDto,
+  PresignResponse,
   RequestOtpResponse,
   UserDto,
 } from '@del/shared-types';
@@ -129,11 +132,20 @@ export const api = {
     token: string,
     conversationId: string,
     clientMsgId: string,
-    body: string,
+    body?: string,
+    mediaId?: string,
   ) =>
     request<{ message: MessageDto; duplicate: boolean }>(
       `/conversations/${conversationId}/messages`,
-      { method: 'POST', token, body: JSON.stringify({ clientMsgId, body }) },
+      {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          clientMsgId,
+          ...(body !== undefined ? { body } : {}),
+          ...(mediaId ? { mediaId } : {}),
+        }),
+      },
     ),
 
   markRead: (token: string, conversationId: string, lastReadSeq: number) =>
@@ -179,6 +191,42 @@ export const api = {
       token,
       body: JSON.stringify({ title }),
     }),
+
+  // ————— رسانه (گام ۵) —————
+
+  presignMedia: (
+    token: string,
+    input: {
+      conversationId: string;
+      mime: string;
+      size: number;
+      originalName?: string;
+      width?: number;
+      height?: number;
+    },
+  ) =>
+    request<PresignResponse>('/media/presign', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(input),
+    }),
+
+  completeMedia: (
+    token: string,
+    mediaId: string,
+    parts?: { partNumber: number; etag: string }[],
+  ) =>
+    request<MediaAssetDto>('/media/complete', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ mediaId, ...(parts ? { parts } : {}) }),
+    }),
+
+  getMediaMeta: (token: string, mediaId: string) =>
+    request<MediaAssetDto>(`/media/${mediaId}`, { token }),
+
+  getMediaUrl: (token: string, mediaId: string, variant: 'thumb' | 'original' = 'original') =>
+    request<MediaUrlResponse>(`/media/${mediaId}/url?variant=${variant}`, { token }),
 };
 
 function PlatformOS(): string {

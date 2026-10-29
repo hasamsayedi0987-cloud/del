@@ -27,7 +27,9 @@ import { PresenceService } from '../presence/presence.service';
 interface SendPayload {
   conversationId: string;
   clientMsgId: string;
-  body: string;
+  body?: string;
+  /** پیام رسانه‌ای (گام ۵) */
+  mediaId?: string;
 }
 
 interface JoinPayload {
@@ -176,15 +178,19 @@ export class MessagesGateway
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     try {
-      const { conversationId, clientMsgId, body } = payload ?? ({} as SendPayload);
-      if (!conversationId || !clientMsgId || typeof body !== 'string' || !body.trim()) {
-        return { ok: false, error: { code: 'BAD_PAYLOAD', message: 'conversationId, clientMsgId, body required' } };
+      const { conversationId, clientMsgId, body, mediaId } = payload ?? ({} as SendPayload);
+      if (!conversationId || !clientMsgId) {
+        return { ok: false, error: { code: 'BAD_PAYLOAD', message: 'conversationId, clientMsgId required' } };
+      }
+      if (mediaId === undefined && (typeof body !== 'string' || !body.trim())) {
+        return { ok: false, error: { code: 'BAD_PAYLOAD', message: 'body or mediaId required' } };
       }
       const result = await this.messages.sendMessage(
         client.data.userId,
         conversationId,
         clientMsgId,
-        body.trim(),
+        body,
+        mediaId,
       );
       return { ok: true, ...result };
     } catch (e) {
@@ -330,9 +336,15 @@ export class MessagesGateway
       // اعضا برای دیدن عنوان تازه لیست را رفرش می‌کنند — همان رویداد updated کافی است
     };
     this.events.on('conversation.renamed', this.onConversationRenamed);
+    // آپلود رسانه تأیید شد — اعضا می‌توانند برای دانلود URL بگیرند
+    this.onMediaReady = (p: { conversationId: string; media: unknown }) => {
+      this.server?.to(room(p.conversationId)).emit('media.ready', p);
+    };
+    this.events.on('media.ready', this.onMediaReady);
   }
 
   private onMessageCreated?: (message: MessageDto) => void;
+  private onMediaReady?: (payload: { conversationId: string; media: unknown }) => void;
   private onConversationCreated?: (payload: {
     conversationId: string;
     userIds: string[];
@@ -363,6 +375,7 @@ export class MessagesGateway
 
   onModuleDestroy(): void {
     if (this.onMessageCreated) this.events.off('message.created', this.onMessageCreated);
+    if (this.onMediaReady) this.events.off('media.ready', this.onMediaReady);
     if (this.onConversationCreated) {
       this.events.off('conversation.created', this.onConversationCreated);
     }

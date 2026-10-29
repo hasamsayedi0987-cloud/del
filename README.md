@@ -1,7 +1,7 @@
 # دل (Del) — پیام‌رسان امن چندسکویی
 
 > iOS · Android · Windows · macOS — «دل»، بیش از یک گفت‌وگو (Del — More Than a Chat)
-> وضعیت فعلی: **گام ۴ از پیاده‌سازی — مکالمه‌های گروهی (ساخت گروه، اعضا، نقش ادمین، پیام گروهی) اجرا و تست‌شده** ✅
+> وضعیت فعلی: **گام ۵ از پیاده‌سازی — رسانه (عکس/ویدیو/فایل با Presigned URL + بندانگشتی) اجرا و تست‌شده** ✅
 
 ## این مخزن چیست؟
 
@@ -16,8 +16,8 @@
 | **گام ۲** | **پیام‌رسانی بلادرنگ: مکالمه/پیام + WebSocket + idempotency + cursor** | ✅ **اجرا و تست دود شد (۲۱/۲۱)** |
 | **گام ۳** | **حضور (online/lastSeen) + تایپینگ + رسید خواندن (✓✓) + همگام‌سازی آفلاین (since)** | ✅ **اجرا و تست دود شد (۱۷/۱۷)** |
 | **گام ۴** | **مکالمه‌های گروهی: ساخت گروه، اعضا، نقش ادمین، پیام گروهی بلادرنگ** | ✅ **اجرا و تست دود شد (۲۵/۲۵)** |
-| گام ۵ | رسانه (MinIO + Presigned URL) | ⬜ بعدی |
-| گام ۶ | تماس صوتی/تصویری (LiveKit) | ⬜ |
+| **گام ۵** | **رسانه: آپلود/دانلود Presigned (S3/MinIO)، magic bytes، بندانگشتی، پیام رسانه‌ای بلادرنگ** | ✅ **اجرا و تست دود شد (۳۲/۳۲)** |
+| گام ۶ | تماس صوتی/تصویری (LiveKit) | ⬜ بعدی |
 | گام ۷ | E2EE (Signal) — فقط پس از پایداری بستر | ⬜ |
 
 ### آنچه در گام ۱ واقعاً ساخته و تست شده است
@@ -57,6 +57,17 @@
 - **UI موبایل/دسکتاپ:** دکمه «+ گروه» و مودال ساخت گروه؛ ردیف گروه با «N عضو»؛ هدر چت گروه + نقش شما؛ نام فرستنده بالای حباب‌ها؛ تیک خوانده‌شد گروهی
 - **تست دود ۲۵ سناریویی** — `scripts/smoke-step4.js` — ۲۵/۲۵ سبز (رگرسیون گام‌های ۱ تا ۳ هم سبز)
 
+### آنچه در گام ۵ واقعاً ساخته و تست شده است
+
+- **اصل معماری:** بایت‌های رسانه هرگز از API عبور نمی‌کنند — presign → PUT مستقیم به S3/MinIO → complete؛ API فقط مجوز و امضا صادر می‌کند
+- **REST رسانه:** `POST /media/presign` (whitelist نوع + سقف ۲۵MB تصویر / ۱GB بقیه) · `POST /media/complete` (اندازه واقعی + **magic bytes** + thumbnail) · `GET /media/:id` · `GET /media/:id/url` (فقط عضو، URL پنج‌دقیقه‌ای، `?variant=thumb`)
+- **multipart آپلود** برای فایل‌های >۱۰MB (پارت ۸MB، حداکثر ۱۰۰۰۰ پارت) — uploadId در DB تا complete از هر نمونه API کار کند؛ رد محتوا = Abort + Delete از bucket
+- **پیام رسانه‌ای:** `mediaId` در REST/WS send؛ `type=image|video|audio|file`؛ media DTO در تاریخچه/since-sync/`message.new`؛ رویداد `media.ready` به اتاق مکالمه؛ قواعد MEDIA_NOT_OWNED/MEDIA_WRONG_CONVERSATION/MEDIA_NOT_READY
+- **بندانگشتی:** sharp — حداکثر ۷۶۸px JPEG q80 برای تصاویر (+ ابعاد واقعی) — اختیاری و بدون شکستن آپلود
+- **UI موبایل:** دکمه 📎 + expo-image-picker (عکس/ویدیو)، حباب آپلود، Image درون‌خطی با نسبت واقعی، ردیف پیوست ویدیو/فایل با باز کردن؛ **دسکتاپ:** دکمه 📎 + file input، همان جریان (File.slice برای پارت‌ها)، CSP جدید برای img
+- **زیرساخت:** MinIO در dev compose (با bucket خودکار) + minio/minio-init و S3_* در prod compose؛ بدون S3_* آپ سرویس بالا می‌آید ولی رسانه 503 می‌دهد
+- **تست دود ۳۲ سناریویی** — `scripts/smoke-step5.js` — ۳۲/۳۲ سبز (رگرسیون گام‌های ۱ تا ۴ هم سبز — ۱۰۳ سناریو در کل)
+
 ## پشته فناوری
 
 | لایه | انتخاب |
@@ -64,7 +75,7 @@
 | موبایل | React Native 0.81 + Expo SDK 54 + TypeScript |
 | دسکتاپ | Electron 33 (الان JS خالص؛ انتقال به React در گام‌های بعدی) |
 | بک‌اند | NestJS 10 (Modular Monolith) + Prisma 6 + PostgreSQL 16 + Redis 7 |
-| رسانه | Object Storage سازگار S3 (MinIO در dev) — از گام ۵ |
+| رسانه | Object Storage سازگار S3 (MinIO در dev) — Presigned URL از گام ۵ ✅ |
 | CI/CD | GitHub Actions + Docker |
 | مدیریت مخزن | pnpm workspaces + Turborepo |
 
@@ -112,7 +123,7 @@ apps/            mobile (Expo) · desktop (Electron) · api (NestJS)
 packages/        shared-types (فعال) · validation · api-client · design-system · config
 docs/            ۹ سند فاز ۱ + docs/implementation/ (سند هر گام)
 infrastructure/  docker-compose.dev.yml · docker-compose.prod.yml
-scripts/         smoke-step1.sh تا smoke-step4.js (تست‌های دود)
+scripts/         smoke-step1.sh تا smoke-step5.js (تست‌های دود)
 ci/              سه workflow GitHub Actions (فعال‌سازی: ci/README.md)
 ```
 

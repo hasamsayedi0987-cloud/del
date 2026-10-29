@@ -460,10 +460,13 @@ function renderMessages() {
       sender.textContent = memberName(m.senderId);
       div.appendChild(sender);
     }
-    const body = document.createElement('span');
-    body.className = 'msg-body';
-    body.textContent = m.body;
-    div.appendChild(body);
+    if (m.media) div.appendChild(buildMediaNode(m.media));
+    if (m.body) {
+      const body = document.createElement('span');
+      body.className = 'msg-body';
+      body.textContent = m.body;
+      div.appendChild(body);
+    }
     if (mine) {
       const status = document.createElement('span');
       status.className = 'msg-status';
@@ -473,6 +476,43 @@ function renderMessages() {
     list.appendChild(div);
   }
   list.scrollTop = list.scrollHeight;
+}
+
+/** گره رسانه در چت — تصویر درون‌خطی یا ردیف پیوست */
+function buildMediaNode(media) {
+  if (media.kind === 'image') {
+    const wrap = document.createElement('div');
+    wrap.className = 'media-image-wrap';
+    const img = document.createElement('img');
+    img.className = 'media-image';
+    img.alt = media.originalName ?? 'عکس';
+    if (media.width && media.height) img.dataset.ratio = String(media.width / media.height);
+    wrap.appendChild(img);
+    getMediaSignedUrl(media.id)
+      .then((u) => { img.src = u; })
+      .catch(() => { img.replaceWith(Object.assign(document.createElement('span'), { className: 'msg-body dim', textContent: 'نمایش عکس ممکن نشد' })); });
+    return wrap;
+  }
+  const row = document.createElement('div');
+  row.className = 'media-attach';
+  const icon = document.createElement('span');
+  icon.className = 'media-attach-icon';
+  icon.textContent = media.kind === 'video' ? '🎬' : media.kind === 'audio' ? '🎵' : '📄';
+  const meta = document.createElement('span');
+  meta.className = 'media-attach-meta';
+  const name = document.createElement('b');
+  name.textContent = media.originalName ?? 'فایل';
+  const size = document.createElement('small');
+  size.textContent = `${faDigits(Math.max(1, Math.round(media.size / 1024)))} کیلوبایت`;
+  meta.append(name, document.createElement('br'), size);
+  row.append(icon, meta);
+  row.onclick = async () => {
+    try {
+      const u = await getMediaSignedUrl(media.id);
+      window.open(u, '_blank');
+    } catch { /* منقضی — دوباره تلاش با کلیک بعدی */ }
+  };
+  return row;
 }
 
 $('sendMsg').onclick = () => sendMessage();
@@ -517,6 +557,96 @@ function sendMessage() {
     void fallbackRest();
   }
 }
+
+// ————— گام ۵: رسانه — آپلود مستقیم به S3 با Presigned URL —————
+
+const mediaUrlCache = new Map(); // mediaId → { url, expiresAt }
+
+async function getMediaSignedUrl(mediaId) {
+  const hit = mediaUrlCache.get(mediaId);
+  if (hit && hit.expiresAt > Date.now() + 60000) return hit.url;
+  const res = await apiCall(`/media/${mediaId}/url`, { token: session.accessToken });
+  mediaUrlCache.set(mediaId, { url: res.url, expiresAt: new Date(res.expiresAt).getTime() });
+  return res.url;
+}
+
+async function uploadMediaToS3(file) {
+  const pre = await apiCall('/media/presign', {
+    method: 'POST',
+    token: session.accessToken,
+    body: {
+      conversationId: currentConv.id,
+      mime: file.type || 'application/octet-stream',
+      size: file.size,
+      originalName: file.name,
+    },
+  });
+  if (pre.mode === 'single' && pre.url) {
+    const res = await fetch(pre.url, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if (!res.ok) throw { code: 'UPLOAD_FAILED', message: `آپلود ناموفق (${res.status})` };
+  } else if (pre.mode === 'multipart' && pre.partUrls && pre.partSize) {
+    const parts = [];
+    for (let i = 0; i < pre.partUrls.length; i++) {
+      const blob = file.slice(i * pre.partSize, (i + 1) * pre.partSize);
+      const res = await fetch(pre.partUrls[i], {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: blob,
+      });
+      if (!res.ok) throw { code: 'UPLOAD_FAILED', message: `آپلود پارت ${faDigits(i + 1)} ناموفق بود` };
+      const etag = res.headers.get('etag');
+      if (!etag) throw { code: 'UPLOAD_FAILED', message: 'etag پارت دریافت نشد' };
+      parts.push({ partNumber: i + 1, etag });
+    }
+  }
+  return await apiCall('/media/complete', {
+    method: 'POST', token: session.accessToken,
+    body: { mediaId: pre.mediaId, ...(pre.mode === 'multipart' ? { parts } : {}) },
+  });
+}
+
+$('attachBtn').onclick = () => $('fileInput').click();
+$('fileInput').addEventListener('change', async () => {
+  const file = $('fileInput').files[0];
+  $('fileInput').value = '';
+  if (!file || !currentConv) return;
+  const clientMsgId = uuid();
+  try {
+    const media = await uploadMediaToS3(file);
+    const caption = $('msgInput').value.trim();
+    $('msgInput').value = '';
+    const payload = {
+      conversationId: currentConv.id,
+      clientMsgId,
+      mediaId: media.id,
+      ...(caption ? { body: caption } : {}),
+    };
+    const fallbackRest = async () => {
+      const r = await apiCall(`/conversations/${currentConv.id}/messages`, {
+        method: 'POST', token: session.accessToken, body: payload,
+      });
+      upsertMessage(r.message);
+    };
+    if (socket?.connected) {
+      socket.timeout(15000).emit('message.send', payload, (err, ack) => {
+        if (!err && ack?.ok && ack.message) upsertMessage(ack.message);
+        else void fallbackRest();
+      });
+    } else {
+      void fallbackRest();
+    }
+  } catch (e) {
+    alert(e.code === 'MEDIA_TOO_LARGE'
+      ? 'حجم فایل بیشتر از حد مجاز است'
+      : e.code === 'MIME_NOT_ALLOWED'
+        ? 'این نوع فایل مجاز نیست'
+        : e.message ?? 'آپلود فایل ناموفق بود');
+  }
+});
 
 // ————— پروفایل —————
 $('goProfile').onclick = () => {

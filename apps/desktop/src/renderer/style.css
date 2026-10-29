@@ -195,3 +195,29 @@ button.small-btn { width: auto; margin: 4px auto 0; padding: 8px 16px; font-size
   color: var(--text); font-family: inherit; font-size: 15px;
   padding: 10px 14px; resize: vertical;
 }
+
+/* ————— گام ۵: رسانه ————— */
+.composer .attach { padding: 10px 12px; font-size: 16px; line-height: 1; }
+.media-image-wrap { margin-top: 4px; }
+.media-image {
+  max-width: 320px;
+  max-height: 260px;
+  border-radius: 10px;
+  display: block;
+  background: rgba(255, 255, 255, 0.06);
+}
+.media-attach {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-top: 4px;
+  cursor: pointer;
+  min-width: 180px;
+}
+.media-attach:hover { background: rgba(255, 255, 255, 0.12); }
+.media-attach-icon { font-size: 22px; }
+.media-attach-meta { color: #EAF6FF; font-size: 13px; line-height: 1.5; }
+.media-attach-meta small { color: rgba(234, 246, 255, 0.6); }

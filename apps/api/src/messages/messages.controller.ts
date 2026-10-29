@@ -63,7 +63,7 @@ export class MessagesController {
     });
   }
 
-  /** ارسال پیام (idempotent با clientMsgId) */
+  /** ارسال پیام (idempotent با clientMsgId) — رسانه‌ای یا متنی */
   @Post(':id/messages')
   @HttpCode(201)
   send(
@@ -71,7 +71,7 @@ export class MessagesController {
     @Param('id') id: string,
     @Body() dto: SendMessageDto,
   ): Promise<{ message: MessageDto; duplicate: boolean }> {
-    return this.messages.sendMessage(req.user.sub, id, dto.clientMsgId, dto.body);
+    return this.messages.sendMessage(req.user.sub, id, dto.clientMsgId, dto.body, dto.mediaId);
   }
 
   /** علامت‌گذاری خواندن تا lastReadSeq */

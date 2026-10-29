@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; connect-src 'self' http: https: ws: wss:; style-src 'self'; script-src 'self'" />
+        content="default-src 'self'; connect-src 'self' http: https: ws: wss:; img-src 'self' http: https: data: blob:; style-src 'self'; script-src 'self'" />
   <title>دل</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -66,6 +66,8 @@
     <button id="loadOlder" class="ghost small-btn hidden">پیام‌های قدیمی‌تر…</button>
     <div id="msgList" class="msg-list"></div>
     <div class="composer">
+      <button id="attachBtn" class="ghost attach" title="ارسال فایل" accessibilityLabel="ارسال فایل">📎</button>
+      <input id="fileInput" type="file" class="hidden" />
       <input id="msgInput" type="text" placeholder="پیام…" />
       <button id="sendMsg" class="primary send">ارسال</button>
     </div>

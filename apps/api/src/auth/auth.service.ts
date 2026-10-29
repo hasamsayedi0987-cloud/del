@@ -7,7 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { AuthSession, RequestOtpResponse, UserDto } from '@del/shared-types';
-import { AppConfig } from '../config/configuration';
+import { AppConfig, appConfig } from '../config/configuration';
 import { PrismaService } from '../infra/prisma.service';
 import { RateLimitService } from '../common/rate-limit.service';
 import type { AccessPayload } from '../common/jwt-auth.guard';
@@ -55,23 +55,8 @@ export class AuthService {
   ) {}
 
   private cfg(): AppConfig {
-    // configuration در ConfigModule لود شده و مقادیر در process.env هستند
-    return {
-      nodeEnv: (process.env.NODE_ENV as AppConfig['nodeEnv']) ?? 'development',
-      port: 3000,
-      databaseUrl: '',
-      redisUrl: process.env.REDIS_URL,
-      jwtAccessSecret: process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me',
-      jwtRefreshSecret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
-      accessTokenTtl: Number(process.env.ACCESS_TOKEN_TTL ?? 900),
-      refreshTokenTtl: Number(process.env.REFRESH_TOKEN_TTL ?? 2592000),
-      authDevMode: (process.env.AUTH_DEV_MODE ?? 'true') === 'true',
-      otpPerPhoneLimit: Number(process.env.OTP_PER_PHONE_LIMIT ?? 3),
-      otpPhoneWindowSec: Number(process.env.OTP_PHONE_WINDOW_SEC ?? 600),
-      otpTtlSec: Number(process.env.OTP_TTL_SEC ?? 300),
-      otpMaxAttempts: Number(process.env.OTP_MAX_ATTEMPTS ?? 5),
-      version: '0.1.0',
-    };
+    // configuration از process.env خوانده می‌شود (همان منبع ConfigModule)
+    return appConfig.load();
   }
 
   /**

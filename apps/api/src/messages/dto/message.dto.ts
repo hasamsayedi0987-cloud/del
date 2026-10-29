@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
@@ -8,10 +8,18 @@ export class SendMessageDto {
   @IsUUID()
   clientMsgId!: string;
 
+  /** متن یا کپشن — برای پیام رسانه‌ای اختیاری است */
   @ApiProperty({ example: 'سلام! این اولین پیام دل است 👋' })
+  @IsOptional()
   @IsString()
-  @Length(1, 4000)
-  body!: string;
+  @Length(0, 4000)
+  body?: string;
+
+  /** پیام رسانه‌ای (گام ۵) — MediaAsset با status=ready متعلق به خودم در همین مکالمه */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  mediaId?: string;
 }
 
 export class MarkReadDto {

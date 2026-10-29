@@ -2,6 +2,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import type {
   ConversationDto,
+  MediaAssetDto,
   MessageDto,
   ParticipantDto,
 } from '@del/shared-types';
@@ -10,6 +11,21 @@ import { PrismaService } from '../infra/prisma.service';
 function httpError(status: number, code: string, message: string): HttpException {
   return new HttpException({ statusCode: status, error: { code, message } }, status);
 }
+
+const MEDIA_SELECT = {
+  id: true,
+  ownerId: true,
+  conversationId: true,
+  kind: true,
+  mime: true,
+  size: true,
+  originalName: true,
+  width: true,
+  height: true,
+  status: true,
+  thumbKey: true,
+  createdAt: true,
+} as const;
 
 export function toMessageDto(m: {
   id: string;
@@ -22,6 +38,7 @@ export function toMessageDto(m: {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+  media?: MediaAssetDtoSource | null;
 }): MessageDto {
   return {
     id: m.id,
@@ -31,9 +48,42 @@ export function toMessageDto(m: {
     clientMsgId: m.clientMsgId,
     type: m.type,
     body: m.body,
+    media: m.media ? toMediaDtoShallow(m.media) : null,
     createdAt: m.createdAt.toISOString(),
     editedAt: m.editedAt?.toISOString() ?? null,
     deletedAt: m.deletedAt?.toISOString() ?? null,
+  };
+}
+
+interface MediaAssetDtoSource {
+  id: string;
+  ownerId: string;
+  conversationId: string;
+  kind: string;
+  mime: string;
+  size: number;
+  originalName: string | null;
+  width: number | null;
+  height: number | null;
+  status: string;
+  thumbKey: string | null;
+  createdAt: Date;
+}
+
+function toMediaDtoShallow(m: MediaAssetDtoSource): MediaAssetDto {
+  return {
+    id: m.id,
+    ownerId: m.ownerId,
+    conversationId: m.conversationId,
+    kind: m.kind as MediaAssetDto['kind'],
+    mime: m.mime,
+    size: m.size,
+    originalName: m.originalName,
+    width: m.width,
+    height: m.height,
+    status: m.status as MediaAssetDto['status'],
+    hasThumb: Boolean(m.thumbKey),
+    createdAt: m.createdAt.toISOString(),
   };
 }
 
@@ -234,6 +284,7 @@ export class MessagesService {
     const me = await this.requireParticipant(meId, conversationId);
     void me;
     const limit = Math.min(opts.limit ?? 50, 200);
+    const mediaInclude = { include: { media: { select: MEDIA_SELECT } } } as const;
 
     // حالت since — همگام‌سازی آفلاین (اولویت با since است)
     if (opts.since !== undefined) {
@@ -241,6 +292,7 @@ export class MessagesService {
         where: { conversationId, serverSeq: { gt: opts.since } },
         orderBy: { serverSeq: 'asc' },
         take: limit + 1,
+        ...mediaInclude,
       });
       const hasMore = rows.length > limit;
       const page = rows.slice(0, limit);
@@ -260,6 +312,7 @@ export class MessagesService {
       },
       orderBy: { serverSeq: 'desc' },
       take: limit + 1,
+      ...mediaInclude,
     });
 
     const hasMore = rows.length > limit;
@@ -276,18 +329,43 @@ export class MessagesService {
    * ارسال پیام — idempotent با clientMsgId:
    * ارسال مجدد همان clientMsgId پیامِ موجود را برمی‌گرداند بدون تکرار.
    * serverSeq با قفل اتمی روی سطر Conversation تخصیص می‌یابد.
+   * پیام رسانه‌ای (گام ۵): mediaId باید ready و متعلق به فرستنده در همین مکالمه باشد.
    */
   async sendMessage(
     meId: string,
     conversationId: string,
     clientMsgId: string,
-    body: string,
+    body: string | undefined,
+    mediaId?: string,
   ): Promise<SendResult> {
     await this.requireParticipant(meId, conversationId);
+
+    // ۰) اعتبارسنجی رسانه — مالکیت، مکالمه، وضعیت
+    let media: { id: string; kind: string; originalName: string | null } | null = null;
+    if (mediaId) {
+      const asset = await this.prisma.mediaAsset.findUnique({ where: { id: mediaId } });
+      if (!asset) throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
+      if (asset.ownerId !== meId) {
+        throw httpError(403, 'MEDIA_NOT_OWNED', 'You can only send media you uploaded');
+      }
+      if (asset.conversationId !== conversationId) {
+        throw httpError(400, 'MEDIA_WRONG_CONVERSATION', 'Media belongs to another conversation');
+      }
+      if (asset.status !== 'ready') {
+        throw httpError(400, 'MEDIA_NOT_READY', 'Upload is not completed (or was rejected)');
+      }
+      media = { id: asset.id, kind: asset.kind, originalName: asset.originalName };
+    }
+
+    const text = (body ?? '').trim();
+    if (!media && !text) {
+      throw httpError(400, 'EMPTY_MESSAGE', 'Message body or mediaId is required');
+    }
 
     // ۱) بررسی idempotency (مسیر سریع)
     const dup = await this.prisma.message.findUnique({
       where: { conversationId_clientMsgId: { conversationId, clientMsgId } },
+      include: { media: { select: MEDIA_SELECT } },
     });
     if (dup) return { message: toMessageDto(dup), duplicate: true };
 
@@ -305,8 +383,11 @@ export class MessagesService {
           senderId: meId,
           serverSeq: conv.lastSeq,
           clientMsgId,
-          body,
+          type: media ? media.kind : 'text',
+          body: text || media?.originalName || '',
+          ...(media ? { mediaId: media.id } : {}),
         },
+        include: { media: { select: MEDIA_SELECT } },
       });
 
       await tx.conversation.update({

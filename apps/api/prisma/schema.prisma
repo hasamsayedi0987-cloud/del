@@ -25,6 +25,7 @@ model User {
   refreshTokens  RefreshToken[]
   participations Participant[]
   messages       Message[]
+  mediaAssets    MediaAsset[]
 }
 
 model Device {
@@ -84,6 +85,7 @@ model Conversation {
 
   participants Participant[]
   messages     Message[]
+  mediaAssets  MediaAsset[]
 
   @@index([lastMessageAt])
 }
@@ -109,16 +111,47 @@ model Message {
   senderId       String    @db.Uuid
   serverSeq      Int
   clientMsgId    String // UUID تولیدشده سمت کلاینت — تضمین تحویل idempotent
-  type           String    @default("text") // text (رسانه در گام ۴)
+  type           String    @default("text") // text | image | video | audio | file (رسانه — گام ۵)
   body           String
+  mediaId        String?   @db.Uuid
   createdAt      DateTime  @default(now())
   editedAt       DateTime?
   deletedAt      DateTime?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id])
+  media        MediaAsset?  @relation(fields: [mediaId], references: [id], onDelete: SetNull)
 
   @@unique([conversationId, serverSeq])
   @@unique([conversationId, clientMsgId])
   @@index([conversationId, serverSeq])
+}
+
+// ————— رسانه (گام ۵) —————
+// بایت‌ها هرگز از API عبور نمی‌کنند — آپلود/دانلود مستقیم با Presigned URL از S3/MinIO
+
+model MediaAsset {
+  id             String    @id @default(uuid()) @db.Uuid
+  ownerId        String    @db.Uuid
+  conversationId String    @db.Uuid
+  kind           String // image | video | audio | file
+  mime           String // از whitelist سرور — در complete با magic bytes تأیید می‌شود
+  size           Int // بایت‌های ادعاشده در presign
+  originalName   String?
+  width          Int?
+  height         Int?
+  status         String    @default("pending") // pending | ready | rejected
+  storageKey     String    @unique
+  uploadId       String? // فقط multipart — برای complete/abort
+  thumbKey       String?
+  error          String?
+  createdAt      DateTime  @default(now())
+  readyAt        DateTime?
+
+  owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messages     Message[]
+
+  @@index([conversationId])
+  @@index([ownerId])
 }

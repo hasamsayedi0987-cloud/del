@@ -64,8 +64,10 @@ export interface MessageDto {
   /** شماره ترتیبی یگانه در مکالمه — مبنای مرتب‌سازی و cursor */
   serverSeq: number;
   clientMsgId: string;
-  type: 'text' | string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' | string;
   body: string;
+  /** پیام رسانه‌ای (گام ۵) — متادیتا بدون URL؛ URL کوتاه‌عمر با GET /media/:id/url گرفته می‌شود */
+  media?: MediaAssetDto | null;
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -168,4 +170,56 @@ export interface WsMemberRemoved {
   removedBy: string;
   /** true = خودش خارج شد */
   left: boolean;
+}
+
+// ————— رسانه (گام ۵) —————
+
+export type MediaKind = 'image' | 'video' | 'audio' | 'file';
+
+/** متادیتای فایل رسانه‌ای — بایت‌ها هرگز از API عبور نمی‌کنند (presigned S3) */
+export interface MediaAssetDto {
+  id: string;
+  ownerId: string;
+  conversationId: string;
+  kind: MediaKind;
+  mime: string;
+  /** اندازه بایت — همان که در presign ادعا شده */
+  size: number;
+  originalName: string | null;
+  width: number | null;
+  height: number | null;
+  status: 'pending' | 'ready' | 'rejected';
+  /** فقط تصاویر — بندانگشتی ۷۶۸px سمت سرور ساخته می‌شود */
+  hasThumb: boolean;
+  createdAt: string;
+}
+
+/** پاسخ POST /media/presign — مستقیم به S3 آپلود کن */
+export interface PresignResponse {
+  mediaId: string;
+  mode: 'single' | 'multipart';
+  /** فقط mode=single — PUT کامل فایل */
+  url?: string;
+  /** فقط mode=multipart */
+  uploadId?: string;
+  partSize?: number;
+  /** فقط mode=multipart — URL هر پارت به ترتیب (partNumber = index+1) */
+  partUrls?: string[];
+  expiresAt: string;
+}
+
+/** پاسخ GET /media/:id/url — لینک دانلود امضاشده کوتاه‌عمر */
+export interface MediaUrlResponse {
+  url: string;
+  expiresAt: string;
+  kind: MediaKind;
+  mime: string;
+  size: number;
+  originalName: string | null;
+}
+
+/** آپلود فایل نهایی و تأیید شد — به اتاق مکالمه broadcast می‌شود */
+export interface WsMediaReady {
+  conversationId: string;
+  media: MediaAssetDto;
 }
