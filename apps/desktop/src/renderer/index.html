@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src 'self' http: https:; style-src 'self'; script-src 'self'" />
+  <title>دل</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- صحنه ۱: ورود شماره -->
+  <section id="screen-phone" class="screen active">
+    <div class="logo">دل</div>
+    <h1>به دل خوش آمدید</h1>
+    <p class="sub">برای ورود یا ثبت‌نام، شماره موبایل خود را وارد کنید</p>
+
+    <div class="api-row">
+      <label for="apiBase">آدرس سرور</label>
+      <input id="apiBase" type="text" dir="ltr" placeholder="http://localhost:3000" />
+    </div>
+
+    <input id="phone" type="tel" placeholder="۰۹۱۲ ۱۲۳ ۴۵۶۷" />
+    <div id="phoneError" class="error"></div>
+    <button id="sendOtp" class="primary">دریافت کد ورود</button>
+    <p class="dev-note">حالت توسعه: کد OTP در پاسخ سرور برگردانده می‌شود</p>
+  </section>
+
+  <!-- صحنه ۲: کد تأیید -->
+  <section id="screen-otp" class="screen">
+    <div class="logo small">دل</div>
+    <h1>کد تأیید</h1>
+    <p class="sub" id="otpHint">کد ۶ رقمی ارسال‌شده را وارد کنید</p>
+
+    <input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="______" />
+    <div id="otpError" class="error"></div>
+    <button id="verify" class="primary">ورود به دل</button>
+    <button id="backToPhone" class="ghost">تغییر شماره</button>
+  </section>
+
+  <!-- صحنه ۳: خانه -->
+  <section id="screen-home" class="screen">
+    <h1 id="hello">سلام 👋</h1>
+    <p class="sub">«گام ۱» پروژه دل — زیرساخت احراز هویت آماده است</p>
+
+    <div class="card">
+      <div class="row"><span class="lbl">شماره</span><span id="mePhone" class="val"></span></div>
+      <div class="row"><span class="lbl">نام نمایشی</span><span id="meName" class="val"></span></div>
+      <div class="row"><span class="lbl">شناسه</span><span id="meId" class="val"></span></div>
+    </div>
+
+    <label class="section" for="displayName">نام نمایشی</label>
+    <input id="displayName" type="text" placeholder="مثلاً: علی" />
+    <button id="saveName" class="primary">ذخیره</button>
+
+    <div class="status-row">
+      <span id="healthDot" class="dot"></span>
+      <span id="healthText">وضعیت سرور…</span>
+    </div>
+
+    <button id="logout" class="danger">خروج از حساب</button>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+# ============================================================
+# Del API — production image (multi-stage, pnpm monorepo)
+# Build from repo root:
+#   docker build -f Dockerfile.api -t del-api:latest .
+# Run:
+#   docker run -p 3000:3000 --env-file .env del-api:latest
+# ============================================================
+
+FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+WORKDIR /repo
+
+# ---------- deps ----------
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/shared-types/package.json packages/shared-types/
+# نصب فقط زنجیره وابستگی @del/api (شامل workspace داخلی)
+RUN pnpm install --frozen-lockfile --filter @del/api...
+
+# ---------- build ----------
+FROM base AS build
+COPY --from=deps /repo/node_modules ./node_modules
+COPY --from=deps /repo/apps/api/node_modules ./apps/api/node_modules
+COPY --from=deps /repo/packages/shared-types/node_modules ./packages/shared-types/node_modules
+COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY packages/shared-types packages/shared-types
+COPY apps/api apps/api
+RUN pnpm --filter @del/shared-types build \
+    && pnpm --filter @del/api db:generate \
+    && pnpm --filter @del/api build \
+    # خروجی خودکفا فقط با وابستگی‌های پروداکشن
+    && pnpm --filter @del/api --deploy ../out --prod
+
+# ---------- runner ----------
+FROM node:20-alpine AS runner
+ENV NODE_ENV=production
+WORKDIR /app
+RUN addgroup -S del && adduser -S del -G del
+
+COPY --from=build --chown=del:del /repo/out ./out
+
+USER del
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/v1/health >/dev/null 2>&1 || exit 1
+
+WORKDIR /app/out
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]

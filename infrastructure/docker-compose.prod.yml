@@ -1,0 +1,75 @@
+# ============================================================
+# Del — استقرار پروداکشن (تک‌سرور)
+# Usage از ریشه مخزن:
+#   cp .env.example .env   و مقادیر واقعی را وارد کنید
+#   docker compose -f infrastructure/docker-compose.prod.yml up -d --build
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-del_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?must set}
+      POSTGRES_DB: ${POSTGRES_DB:-del}
+    volumes:
+      - del_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-del_user} -d ${POSTGRES_DB:-del}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - del_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-del_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-del}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?must set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?must set}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-900}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-2592000}
+      # ⚠️ در پروداکشن حتماً false — بعد از اتصال سرویس SMS (گام ۲)
+      AUTH_DEV_MODE: ${AUTH_DEV_MODE:-false}
+    ports:
+      - "${API_PORT:-3000}:3000"
+
+  # ذخیره‌سازی رسانه — در گام رسانه (Step 4) استفاده می‌شود
+  minio:
+    image: minio/minio:latest
+    profiles: ["media"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-del_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?must set}
+    volumes:
+      - del_miniodata:/data
+
+volumes:
+  del_pgdata:
+  del_redisdata:
+  del_miniodata:

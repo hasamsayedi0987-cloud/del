@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "دل",
+    "slug": "del",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "del",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A1628"
+    },
+    "ios": {
+      "bundleIdentifier": "ir.del.app",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "ir.del.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A1628"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}

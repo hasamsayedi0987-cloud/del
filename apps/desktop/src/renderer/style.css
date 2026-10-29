@@ -1,0 +1,109 @@
+/* Del Desktop — Crystal Blue */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0A1628;
+  --surface: #101F38;
+  --surface-alt: #16294A;
+  --border: #1E3A5F;
+  --text: #E8F1FB;
+  --text-dim: #8FA8C8;
+  --accent: #38BDF8;
+  --accent-strong: #0EA5E9;
+  --danger: #F87171;
+  --success: #34D399;
+}
+
+body {
+  font-family: Vazirmatn, "Segoe UI", Tahoma, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(56,189,248,0.12), transparent 60%),
+    var(--bg);
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 48px 24px;
+}
+
+.screen { display: none; width: 100%; max-width: 420px; flex-direction: column; }
+.screen.active { display: flex; }
+
+.logo {
+  width: 96px; height: 96px; margin: 0 auto 24px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(56,189,248,0.12);
+  color: var(--accent);
+  font-size: 40px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+.logo.small { width: 72px; height: 72px; font-size: 28px; }
+
+h1 { font-size: 24px; font-weight: 800; text-align: center; }
+.sub {
+  color: var(--text-dim);
+  font-size: 14px; text-align: center; line-height: 1.9;
+  margin-top: 8px;
+}
+
+input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  padding: 14px 16px;
+  margin-top: 20px;
+  text-align: right;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus { border-color: var(--accent); }
+input::placeholder { color: var(--text-dim); opacity: 0.6; }
+
+button {
+  width: 100%;
+  border: none; border-radius: 12px;
+  font-family: inherit; font-size: 16px; font-weight: 700;
+  padding: 14px;
+  margin-top: 14px;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.05s;
+}
+button:active { transform: scale(0.99); }
+button:disabled { opacity: 0.4; cursor: default; }
+
+button.primary { background: var(--accent-strong); color: #04121F; }
+button.ghost { background: transparent; border: 1px solid var(--border); color: var(--accent); }
+button.danger { background: rgba(248,113,113,0.14); color: var(--danger); }
+
+.error { color: var(--danger); font-size: 13px; min-height: 20px; margin-top: 10px; text-align: right; }
+.dev-note { color: var(--text-dim); font-size: 11px; text-align: center; margin-top: 28px; line-height: 1.8; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 24px;
+}
+.row { display: flex; justify-content: space-between; padding: 8px 0; }
+.lbl { color: var(--text-dim); font-size: 14px; }
+.val { font-size: 14px; font-weight: 600; direction: ltr; unicode-bidi: embed; }
+
+.section { color: var(--text-dim); font-size: 13px; margin-top: 24px; display: block; }
+
+.api-row { margin-top: 20px; }
+.api-row label { color: var(--text-dim); font-size: 12px; display: block; margin-bottom: -10px; }
+.api-row input { text-align: left; direction: ltr; font-size: 13px; margin-top: 12px; }
+
+.status-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 20px; color: var(--text-dim); font-size: 13px;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-dim); }
+.dot.ok { background: var(--success); }
+.dot.down { background: var(--danger); }

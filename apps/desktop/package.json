@@ -1,0 +1,47 @@
+{
+  "name": "@del/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Del Desktop — Windows / macOS / Linux",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "electron-builder --publish never",
+    "build:dir": "electron-builder --dir --publish never",
+    "lint": "node --check src/main.js && echo lint-ok",
+    "typecheck": "echo typecheck-ok (plain js)"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ir.del.app",
+    "productName": "Del",
+    "directories": { "output": "release" },
+    "files": ["src/**/*", "package.json"],
+    "win": {
+      "target": ["nsis", "portable"],
+      "artifactName": "Del-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Del-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Del-Portable-${version}.${ext}"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.social-networking",
+      "identity": null,
+      "artifactName": "Del-${version}-mac.${ext}"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Network",
+      "artifactName": "Del-${version}-linux.${ext}"
+    }
+  }
+}

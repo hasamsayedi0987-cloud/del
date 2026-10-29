@@ -1,0 +1,70 @@
+// Del — Step 1 schema (Auth foundation)
+// جداول پیام‌رسانی (Conversation/Message/...) در گام‌های بعدی اضافه می‌شوند — docs/04-data-model.md
+// TODO(perf): در گام ۲ مهاجرت به UUIDv7 در لایه اپلیکیشن (سازگار با docs/04)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid()) @db.Uuid
+  phone       String   @unique // فرمت E.164 مثل +989121234567
+  displayName String?
+  avatarUrl   String?
+  about       String?
+  lastSeenAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  devices       Device[]
+  refreshTokens RefreshToken[]
+}
+
+model Device {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  platform     String // android | ios | windows | macos | linux | web
+  name         String?
+  pushToken    String?
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId])
+}
+
+/// کد یک‌بارمصرف ورود — فقط هش ذخیره می‌شود، هرگز خودِ کد
+model OtpCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  phone      String
+  codeHash   String // sha256(code + salt)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  deviceId     String?   @db.Uuid
+  tokenHash    String    @unique // sha256(token)
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @db.Uuid
+  createdAt    DateTime  @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}

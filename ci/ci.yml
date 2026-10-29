@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (excluding desktop packaging)
+        run: pnpm turbo run build --filter='!@del/desktop'
+
+      - name: Typecheck mobile
+        run: pnpm --filter @del/mobile typecheck
+
+      - name: Verify Prisma migrations exist
+        run: test -d apps/api/prisma/migrations && echo "migrations ok"

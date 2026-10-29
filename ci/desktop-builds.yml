@@ -1,0 +1,52 @@
+# ساخت نصب‌پذیرهای دسکتاپ: EXE ویندوز + DMG مک + AppImage لینوکس
+# خروجی‌ها در تب Artifacts
+name: Desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/**"
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-exe
+          - os: macos-latest
+            name: macos-dmg
+          - os: ubuntu-latest
+            name: linux-appimage
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build installer
+        run: pnpm --filter @del/desktop build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Del-desktop-${{ matrix.name }}
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.AppImage
+          if-no-files-found: error
