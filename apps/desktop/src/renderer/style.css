@@ -114,6 +114,10 @@ button.danger { background: rgba(248,113,113,0.14); color: var(--danger); }
   gap: 12px; margin-bottom: 8px;
 }
 .topbar h2 { font-size: 20px; font-weight: 800; }
+.chat-head { flex: 1; text-align: center; min-width: 0; }
+.chat-status { font-size: 11px; color: var(--text-dim); margin-top: 2px; min-height: 14px; }
+.chat-status.typing { color: var(--accent); font-weight: 700; }
+.chat-status.online { color: var(--success); }
 button.link {
   background: transparent; border: none; width: auto; padding: 6px 4px;
   margin: 0; color: var(--text-dim); font-size: 14px; font-weight: 600;

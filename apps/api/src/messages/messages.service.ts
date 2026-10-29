@@ -208,18 +208,42 @@ export class MessagesService {
   }
 
   /**
-   * تاریخچه پیام‌ها — صفحه‌بندی با cursor (serverSeq):
-   * پاسخ صعودی است؛ for «بارگذاری قدیمی‌تر» before=کوچک‌ترین seq دریافتی را بفرستید
+   * تاریخچه پیام‌ها — دو حالت:
+   * ۱) before=<seq>: صفحه‌بندی به عقب (بارگذاری قدیمی‌تر) — پاسخ صعودی
+   * ۲) since=<seq>: همگام‌سازی آفلاین — همه پیام‌های بعد از seq به‌صورت صعودی
    */
   async getMessages(
     meId: string,
     conversationId: string,
-    opts: { before?: number; limit?: number },
-  ): Promise<{ messages: MessageDto[]; hasMore: boolean; nextBefore: number | null }> {
+    opts: { before?: number; since?: number; limit?: number },
+  ): Promise<{
+    messages: MessageDto[];
+    hasMore: boolean;
+    nextBefore: number | null;
+    nextSince: number | null;
+  }> {
     const me = await this.requireParticipant(meId, conversationId);
     void me;
-    const limit = Math.min(opts.limit ?? 50, 100);
+    const limit = Math.min(opts.limit ?? 50, 200);
 
+    // حالت since — همگام‌سازی آفلاین (اولویت با since است)
+    if (opts.since !== undefined) {
+      const rows = await this.prisma.message.findMany({
+        where: { conversationId, serverSeq: { gt: opts.since } },
+        orderBy: { serverSeq: 'asc' },
+        take: limit + 1,
+      });
+      const hasMore = rows.length > limit;
+      const page = rows.slice(0, limit);
+      return {
+        messages: page.map(toMessageDto),
+        hasMore,
+        nextBefore: null,
+        nextSince: hasMore ? page[page.length - 1]!.serverSeq : null,
+      };
+    }
+
+    // حالت before — صفحه‌بندی به عقب
     const rows = await this.prisma.message.findMany({
       where: {
         conversationId,
@@ -235,6 +259,7 @@ export class MessagesService {
       messages: page.map(toMessageDto),
       hasMore,
       nextBefore: hasMore ? page[0]!.serverSeq : null,
+      nextSince: null,
     };
   }
 

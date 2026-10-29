@@ -30,10 +30,17 @@ export class ListMessagesQuery {
   @Min(0)
   before?: number;
 
+  /** cursor همگام‌سازی آفلاین: فقط پیام‌های با serverSeq بیشتر از این مقدار (صعودی) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  since?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(200)
   limit?: number;
 }

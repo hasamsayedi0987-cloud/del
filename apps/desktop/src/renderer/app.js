@@ -69,6 +69,49 @@ let socket = null;
 let currentConv = null;
 let localMessages = []; // MessageDto[]
 
+// ————— گام ۳: حضور / تایپینگ / رسید خواندن —————
+let currentPeerId = null;
+let peerLastRead = 0;
+let typingHideTimer = null;
+let lastTypingSent = 0;
+let peerLastPresence = null; // PresenceDto
+let heartbeatTimer = null;
+
+function faRelative(iso) {
+  const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  const fa = (n) => faDigits(n);
+  if (min < 1) return 'همین حالا';
+  if (min < 60) return `${fa(min)} دقیقه پیش`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${fa(h)} ساعت پیش`;
+  return `${fa(Math.floor(h / 24))} روز پیش`;
+}
+
+function renderChatStatus() {
+  const el = $('chatStatus');
+  if (!el || !currentConv) return;
+  if (peerLastPresence?.online) {
+    el.textContent = 'آنلاین';
+    el.className = 'chat-status online';
+  } else if (peerLastPresence?.lastSeen) {
+    el.textContent = `آخرین بازدید ${faRelative(peerLastPresence.lastSeen)}`;
+    el.className = 'chat-status';
+  } else {
+    el.innerHTML = '&nbsp;';
+    el.className = 'chat-status';
+  }
+}
+
+async function refreshPeerPresence() {
+  if (!currentPeerId || !session) return;
+  try {
+    peerLastPresence = await apiCall(`/users/${currentPeerId}/presence`, { token: session.accessToken });
+    renderChatStatus();
+  } catch {
+    /* بی‌اهمیت */
+  }
+}
+
 // ————— صحنه ۱: شماره —————
 $('apiBase').value = store.apiBase;
 $('sendOtp').onclick = async () => {
@@ -119,10 +162,29 @@ $('code').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('verif
 // ————— WebSocket —————
 function connectWs(token) {
   socket?.disconnect();
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
   socket = io(store.apiBase, { auth: { token }, transports: ['websocket'] });
   socket.on('connect', () => {
     $('wsDot').className = 'dot ok';
     $('wsText').textContent = 'اتصال بلادرنگ فعال';
+    // heartbeat حضور هر ۲۵ ثانیه
+    heartbeatTimer = setInterval(() => {
+      if (socket?.connected) socket.emit('presence.heartbeat');
+    }, 25000);
+    // بعد از اتصال مجدد: عضویت مجدد + همگام‌سازی آفلاین
+    if (currentConv) {
+      socket.emit('conversation.join', { conversationId: currentConv.id });
+      const realSeqs = localMessages.map((m) => m.serverSeq).filter((s) => s < Number.MAX_SAFE_INTEGER);
+      const maxSeq = realSeqs.length ? Math.max(...realSeqs) : 0;
+      if (maxSeq > 0) {
+        void apiCall(`/conversations/${currentConv.id}/messages?since=${maxSeq}`, { token: session.accessToken })
+          .then((page) => {
+            (page.messages ?? []).forEach(upsertMessage);
+          })
+          .catch(() => {});
+      }
+      void refreshPeerPresence();
+    }
   });
   socket.on('disconnect', () => {
     $('wsDot').className = 'dot down';
@@ -141,6 +203,28 @@ function connectWs(token) {
   // گفتگوی تازه‌ساخته‌شده توسط کاربر دیگر → رفرش لیست
   socket.on('conversation.new', () => {
     void renderChatList();
+  });
+  // ————— گام ۳ —————
+  socket.on('presence.update', (p) => {
+    if (p.userId === currentPeerId) {
+      peerLastPresence = p;
+      renderChatStatus();
+    }
+  });
+  socket.on('typing', ({ conversationId, userId }) => {
+    if (!currentConv || conversationId !== currentConv.id || userId !== currentPeerId) return;
+    const el = $('chatStatus');
+    el.textContent = 'در حال نوشتن…';
+    el.className = 'chat-status typing';
+    if (typingHideTimer) clearTimeout(typingHideTimer);
+    typingHideTimer = setTimeout(() => {
+      renderChatStatus();
+    }, 4000);
+  });
+  socket.on('message.read', ({ conversationId, userId, lastReadSeq }) => {
+    if (!currentConv || conversationId !== currentConv.id || userId !== currentPeerId) return;
+    peerLastRead = Math.max(peerLastRead, lastReadSeq);
+    renderMessages();
   });
 }
 
@@ -209,7 +293,11 @@ $('newChatPhone').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') 
 async function openChat(conv) {
   currentConv = conv;
   localMessages = [];
+  currentPeerId = conv.peer?.userId ?? null;
+  peerLastRead = conv.peer?.lastReadSeq ?? 0;
+  peerLastPresence = null;
   $('chatTitle').textContent = conv.peer?.displayName ?? conv.peer?.phone ?? 'گفتگو';
+  $('chatStatus').innerHTML = '&nbsp;';
   $('msgList').innerHTML = '';
   $('msgInput').value = '';
   show('chat');
@@ -217,6 +305,7 @@ async function openChat(conv) {
   await loadHistory();
   // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
   socket?.emit('conversation.join', { conversationId: conv.id });
+  void refreshPeerPresence();
 }
 
 async function loadHistory(before) {
@@ -260,6 +349,12 @@ function renderMessages() {
     const div = document.createElement('div');
     div.className = `msg ${mine ? 'mine' : 'peer'}`;
     div.textContent = m.body;
+    if (mine) {
+      const status = document.createElement('span');
+      status.className = 'msg-status';
+      status.textContent = m.serverSeq <= peerLastRead ? '✓✓' : '✓';
+      div.appendChild(status);
+    }
     list.appendChild(div);
   }
   list.scrollTop = list.scrollHeight;
@@ -267,6 +362,15 @@ function renderMessages() {
 
 $('sendMsg').onclick = () => sendMessage();
 $('msgInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') sendMessage(); });
+// «در حال نوشتن» — throttle کلاینت: حداکثر هر ۲٫۵ ثانیه
+$('msgInput').addEventListener('input', () => {
+  if (!currentConv || !$('msgInput').value.trim()) return;
+  const now = Date.now();
+  if (now - lastTypingSent > 2500) {
+    lastTypingSent = now;
+    socket?.emit('typing', { conversationId: currentConv.id });
+  }
+});
 
 function sendMessage() {
   const body = $('msgInput').value.trim();

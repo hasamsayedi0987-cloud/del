@@ -12,7 +12,15 @@ import {
 import { api } from '../api';
 import { getSocket, uuid } from '../socket';
 import { theme } from '../theme';
-import type { ConversationDto, MessageDto, WsMessageNew } from '@del/shared-types';
+import type {
+  ConversationDto,
+  MessageDto,
+  PresenceDto,
+  WsMessageNew,
+  WsMessageRead,
+  WsPresenceUpdate,
+  WsTyping,
+} from '@del/shared-types';
 
 interface LocalMsg extends MessageDto {
   status?: 'sending' | 'sent' | 'failed';
@@ -33,6 +41,18 @@ export function ChatScreen({
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<LocalMsg>>(null);
+
+  // ————— گام ۳: حضور + تایپینگ + رسید خواندن —————
+  const peerId = conversation.peer?.userId ?? null;
+  const [peerPresence, setPeerPresence] = useState<PresenceDto | null>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
+  const [peerLastRead, setPeerLastRead] = useState<number>(conversation.peer?.lastReadSeq ?? 0);
+  const typingHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSent = useRef(0);
+  const messagesRef = useRef<LocalMsg[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const convId = conversation.id;
 
@@ -67,17 +87,79 @@ export function ChatScreen({
     const s = getSocket();
     // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
     s?.emit('conversation.join', { conversationId: convId });
+
+    // حضور اولیه طرف مقابل
+    if (peerId) {
+      void api
+        .getPresence(accessToken, peerId)
+        .then((p) => {
+          if (!cancelled) setPeerPresence(p);
+        })
+        .catch(() => undefined);
+    }
+
     const onNew = (payload: WsMessageNew) => {
       if (payload.conversationId !== convId) return;
       upsert(payload.message);
       void api.markRead(accessToken, convId, payload.message.serverSeq).catch(() => undefined);
     };
+    const onPresence = (p: WsPresenceUpdate) => {
+      if (p.userId !== peerId) return;
+      setPeerPresence({ userId: p.userId, online: p.online, lastSeen: p.lastSeen });
+    };
+    const onTyping = (t: WsTyping) => {
+      if (t.conversationId !== convId || t.userId !== peerId) return;
+      setPeerTyping(true);
+      if (typingHideTimer.current) clearTimeout(typingHideTimer.current);
+      typingHideTimer.current = setTimeout(() => setPeerTyping(false), 4000);
+    };
+    const onRead = (r: WsMessageRead) => {
+      if (r.conversationId !== convId || r.userId !== peerId) return;
+      setPeerLastRead((prev) => Math.max(prev, r.lastReadSeq));
+    };
+    const onReconnect = () => {
+      // بعد از اتصال مجدد: عضویت مجدد در اتاق + همگام‌سازی پیام‌های از دست رفته + حضور تازه
+      s?.emit('conversation.join', { conversationId: convId });
+      const realSeqs = messagesRef.current
+        .filter((m) => m.serverSeq < Number.MAX_SAFE_INTEGER)
+        .map((m) => m.serverSeq);
+      const maxSeq = realSeqs.length ? Math.max(...realSeqs) : 0;
+      if (maxSeq > 0) {
+        void api
+          .getMessages(accessToken, convId, undefined, maxSeq)
+          .then((page) => {
+            if (cancelled || !page.messages.length) return;
+            page.messages.forEach(upsert);
+            const latest = page.messages[page.messages.length - 1];
+            if (latest) {
+              void api.markRead(accessToken, convId, latest.serverSeq).catch(() => undefined);
+            }
+          })
+          .catch(() => undefined);
+      }
+      if (peerId) {
+        void api
+          .getPresence(accessToken, peerId)
+          .then(setPeerPresence)
+          .catch(() => undefined);
+      }
+    };
+
     s?.on('message.new', onNew);
+    s?.on('presence.update', onPresence);
+    s?.on('typing', onTyping);
+    s?.on('message.read', onRead);
+    s?.on('connect', onReconnect);
     return () => {
       cancelled = true;
+      if (typingHideTimer.current) clearTimeout(typingHideTimer.current);
       s?.off('message.new', onNew);
+      s?.off('presence.update', onPresence);
+      s?.off('typing', onTyping);
+      s?.off('message.read', onRead);
+      s?.off('connect', onReconnect);
     };
-  }, [accessToken, convId, upsert]);
+  }, [accessToken, convId, peerId, upsert]);
 
   const send = useCallback(async () => {
     const body = draft.trim();
@@ -135,6 +217,19 @@ export function ChatScreen({
     }
   }, [messages, accessToken, convId]);
 
+  const onChangeDraft = useCallback(
+    (text: string) => {
+      setDraft(text);
+      // throttle کلاینت: حداکثر هر ۲٫۵ ثانیه یک رویداد typing
+      const now = Date.now();
+      if (text.trim() && now - lastTypingSent.current > 2500) {
+        lastTypingSent.current = now;
+        getSocket()?.emit('typing', { conversationId: convId });
+      }
+    },
+    [convId],
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
@@ -144,10 +239,21 @@ export function ChatScreen({
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.back}>‹ بازگشت</Text>
         </TouchableOpacity>
-        <Text style={styles.headerName} numberOfLines={1}>
-          {conversation.peer?.displayName ?? conversation.peer?.phone ?? 'گفتگو'}
-        </Text>
-        <View style={{ width: 60 }} />
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerName} numberOfLines={1}>
+            {conversation.peer?.displayName ?? conversation.peer?.phone ?? 'گفتگو'}
+          </Text>
+          <Text style={[styles.headerStatus, peerTyping ? styles.headerTyping : null]} numberOfLines={1}>
+            {peerTyping
+              ? 'در حال نوشتن…'
+              : peerPresence?.online
+                ? 'آنلاین'
+                : peerPresence?.lastSeen
+                  ? `آخرین بازدید ${faRelative(peerPresence.lastSeen)}`
+                  : ' '}
+          </Text>
+        </View>
+        <View style={{ width: 64 }} />
       </View>
 
       {hasMore ? (
@@ -166,12 +272,16 @@ export function ChatScreen({
         contentContainerStyle={styles.list}
         renderItem={({ item }) => {
           const mine = item.senderId === myUserId;
+          const read = item.serverSeq <= peerLastRead;
           return (
             <View style={[styles.bubbleRow, mine ? { justifyContent: 'flex-start' } : { justifyContent: 'flex-end' }]}>
               <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePeer]}>
                 <Text style={styles.bubbleText}>{item.body}</Text>
                 {mine && item.status === 'sending' ? <Text style={styles.status}>… در حال ارسال</Text> : null}
                 {mine && item.status === 'failed' ? <Text style={styles.statusFailed}>✗ ارسال نشد</Text> : null}
+                {mine && item.status === 'sent' ? (
+                  <Text style={styles.ticks}>{read ? '✓✓' : '✓'}</Text>
+                ) : null}
               </View>
             </View>
           );
@@ -181,7 +291,7 @@ export function ChatScreen({
       <View style={styles.composer}>
         <TextInput
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={onChangeDraft}
           placeholder="پیام…"
           placeholderTextColor={theme.textDim}
           style={styles.input}
@@ -209,7 +319,10 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.border,
   },
   back: { color: theme.accent, fontSize: 15, padding: 8 },
-  headerName: { color: theme.text, fontSize: 17, fontWeight: '800', flex: 1, textAlign: 'center' },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerName: { color: theme.text, fontSize: 17, fontWeight: '800' },
+  headerStatus: { color: theme.textDim, fontSize: 12, marginTop: 2 },
+  headerTyping: { color: theme.accent },
   loadOlder: { color: theme.accent, textAlign: 'center', paddingVertical: 10, fontSize: 13 },
   list: { padding: 12, flexGrow: 1, justifyContent: 'flex-end' },
   bubbleRow: { flexDirection: 'row', marginTop: 6 },
@@ -232,6 +345,7 @@ const styles = StyleSheet.create({
   bubbleText: { color: '#EAF6FF', fontSize: 16, lineHeight: 24, textAlign: 'right' },
   status: { color: 'rgba(4,18,31,0.55)', fontSize: 11, marginTop: 2, textAlign: 'left' },
   statusFailed: { color: '#7f1d1d', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
+  ticks: { color: 'rgba(4,18,31,0.6)', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
   composer: {
     flexDirection: 'row-reverse',
     alignItems: 'flex-end',
@@ -262,3 +376,16 @@ const styles = StyleSheet.create({
   },
   sendText: { color: '#04121F', fontWeight: '800', fontSize: 15 },
 });
+
+/** «۵ دقیقه پیش» — نمایش نسبی فارسی */
+function faRelative(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.max(0, Math.floor(diff / 60000));
+  const fa = (n: number) => String(n).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)] ?? d);
+  if (min < 1) return 'همین حالا';
+  if (min < 60) return `${fa(min)} دقیقه پیش`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${fa(h)} ساعت پیش`;
+  const d = Math.floor(h / 24);
+  return `${fa(d)} روز پیش`;
+}

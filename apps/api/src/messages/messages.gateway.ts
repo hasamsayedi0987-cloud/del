@@ -11,9 +11,10 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
-import type { MessageDto, WsMessageNew, WsConversationNew } from '@del/shared-types';
+import type { MessageDto, WsMessageNew, WsConversationNew, WsTyping, WsPresenceUpdate } from '@del/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { MessagesService } from './messages.service';
+import { PresenceService } from '../presence/presence.service';
 
 interface SendPayload {
   conversationId: string;
@@ -48,6 +49,7 @@ export class MessagesGateway
     private readonly prisma: PrismaService,
     private readonly messages: MessagesService,
     private readonly events: EventEmitter2,
+    private readonly presence: PresenceService,
   ) {}
 
   async handleConnection(client: AuthedSocket): Promise<void> {
@@ -72,11 +74,90 @@ export class MessagesGateway
     });
     for (const p of parts) client.join(room(p.conversationId));
     client.join(userRoom(client.data.userId));
+
+    // حضور: اگر اولین socket این کاربر است → online + اطلاع به هم‌مکالمه‌ها
+    const sockets = this.socketsByUser.get(client.data.userId) ?? new Set<string>();
+    const isFirst = sockets.size === 0;
+    sockets.add(client.id);
+    this.socketsByUser.set(client.data.userId, sockets);
+    if (isFirst) {
+      await this.presence.setOnline(client.data.userId);
+      void this.broadcastPresence(client.data.userId);
+    }
     this.logger.log(`WS connected user=${client.data.userId} rooms=${parts.length}`);
   }
 
   handleDisconnect(client: AuthedSocket): void {
-    this.logger.log(`WS disconnected user=${client.data?.userId ?? '?'}`);
+    const userId = client.data?.userId;
+    this.logger.log(`WS disconnected user=${userId ?? '?'}`);
+    if (!userId) return;
+    const sockets = this.socketsByUser.get(userId);
+    if (!sockets) return;
+    sockets.delete(client.id);
+    this.lastTypingAt.delete(client.id);
+    if (sockets.size === 0) {
+      this.socketsByUser.delete(userId);
+      void this.presence.setOffline(userId).then(() => this.broadcastPresence(userId));
+    }
+  }
+
+  /** شمارش socketهای هر کاربر — حضور فقط با بسته‌شدن آخرین socket خاموش می‌شود */
+  private readonly socketsByUser = new Map<string, Set<string>>();
+  /** throttle رویداد typing به تفکیک socket */
+  private readonly lastTypingAt = new Map<string, number>();
+
+  /** تغییر حضور را به اتاق شخصی همه هم‌مکالمه‌های کاربر می‌فرستد */
+  private async broadcastPresence(userId: string): Promise<void> {
+    const state = await this.presence.get(userId);
+    const payload: WsPresenceUpdate = {
+      userId,
+      online: state.online,
+      lastSeen: state.lastSeen,
+    };
+    const coParticipants = await this.prisma.participant.findMany({
+      where: {
+        conversation: { participants: { some: { userId } } },
+        userId: { not: userId },
+      },
+      distinct: ['userId'],
+      select: { userId: true },
+    });
+    for (const c of coParticipants) {
+      this.server?.to(userRoom(c.userId)).emit('presence.update', payload);
+    }
+  }
+
+  /** heartbeat حضور — TTL کلید online را تمدید می‌کند */
+  @SubscribeMessage('presence.heartbeat')
+  async onHeartbeat(@ConnectedSocket() client: AuthedSocket): Promise<{ ok: boolean }> {
+    await this.presence.heartbeat(client.data.userId);
+    return { ok: true };
+  }
+
+  /**
+   * «در حال نوشتن» — کلاینت throttle می‌کند؛ سرور هم محافظت می‌کند (حداکثر هر ۱٫۵ ثانیه)
+   * فقط برای اعضای اتاق (بررسی عضویت از طریق rooms) و بدون echo به فرستنده.
+   */
+  @SubscribeMessage('typing')
+  onTyping(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() payload: { conversationId?: string },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): any {
+    const conversationId = payload?.conversationId;
+    if (!conversationId) {
+      return { ok: false, error: { code: 'BAD_PAYLOAD', message: 'conversationId required' } };
+    }
+    if (!client.rooms.has(room(conversationId))) {
+      return { ok: false, error: { code: 'NOT_A_PARTICIPANT', message: 'Join the conversation first' } };
+    }
+    const now = Date.now();
+    const last = this.lastTypingAt.get(client.id) ?? 0;
+    if (now - last < 1500) return { ok: true, throttled: true };
+    this.lastTypingAt.set(client.id, now);
+    const event: WsTyping = { conversationId, userId: client.data.userId };
+    client.to(room(conversationId)).emit('typing', event);
+    return { ok: true };
   }
 
   /** ارسال پیام از مسیر WS — همان مسیر سرویس REST با idempotency یکسان */
@@ -161,6 +242,16 @@ export class MessagesGateway
       }
     };
     this.events.on('conversation.created', this.onConversationCreated);
+
+    // رسید خواندن بلادرنگ — event داخلی markRead → اتاق مکالمه
+    this.onConversationRead = (payload: {
+      conversationId: string;
+      userId: string;
+      lastReadSeq: number;
+    }) => {
+      this.server?.to(room(payload.conversationId)).emit('message.read', payload);
+    };
+    this.events.on('conversation.read', this.onConversationRead);
   }
 
   private onMessageCreated?: (message: MessageDto) => void;
@@ -168,12 +259,18 @@ export class MessagesGateway
     conversationId: string;
     userIds: string[];
   }) => void;
+  private onConversationRead?: (payload: {
+    conversationId: string;
+    userId: string;
+    lastReadSeq: number;
+  }) => void;
 
   onModuleDestroy(): void {
     if (this.onMessageCreated) this.events.off('message.created', this.onMessageCreated);
     if (this.onConversationCreated) {
       this.events.off('conversation.created', this.onConversationCreated);
     }
+    if (this.onConversationRead) this.events.off('conversation.read', this.onConversationRead);
   }
 }
 

@@ -49,11 +49,17 @@ export function ChatsScreen({
     const onNewConv = (_payload: WsConversationNew) => {
       void refresh();
     };
+    // خواندن در دستگاه دیگر → نشان نخوانده به‌روز شود
+    const onRead = () => {
+      void refresh();
+    };
     s?.on('conversation.updated', onUpdate);
     s?.on('conversation.new', onNewConv);
+    s?.on('message.read', onRead);
     return () => {
       s?.off('conversation.updated', onUpdate);
       s?.off('conversation.new', onNewConv);
+      s?.off('message.read', onRead);
     };
   }, [refresh]);
 

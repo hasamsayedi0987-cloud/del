@@ -3,6 +3,7 @@ import type {
   AuthSession,
   ConversationDto,
   MessageDto,
+  PresenceDto,
   RequestOtpResponse,
   UserDto,
 } from '@del/shared-types';
@@ -106,11 +107,23 @@ export const api = {
   listConversations: (token: string) =>
     request<ConversationDto[]>('/conversations', { token }),
 
-  getMessages: (token: string, conversationId: string, before?: number) =>
-    request<{ messages: MessageDto[]; hasMore: boolean; nextBefore: number | null }>(
-      `/conversations/${conversationId}/messages${before !== undefined ? `?before=${before}` : ''}`,
-      { token },
-    ),
+  getMessages: (
+    token: string,
+    conversationId: string,
+    before?: number,
+    since?: number,
+  ) => {
+    const params: string[] = [];
+    if (before !== undefined) params.push(`before=${before}`);
+    if (since !== undefined) params.push(`since=${since}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
+    return request<{
+      messages: MessageDto[];
+      hasMore: boolean;
+      nextBefore: number | null;
+      nextSince: number | null;
+    }>(`/conversations/${conversationId}/messages${qs}`, { token });
+  },
 
   sendMessageRest: (
     token: string,
@@ -129,6 +142,11 @@ export const api = {
       token,
       body: JSON.stringify({ lastReadSeq }),
     }),
+
+  // ————— حضور (گام ۳) —————
+
+  getPresence: (token: string, userId: string) =>
+    request<PresenceDto>(`/users/${userId}/presence`, { token }),
 };
 
 function PlatformOS(): string {

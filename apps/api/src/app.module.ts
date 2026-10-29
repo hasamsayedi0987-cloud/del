@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { UsersModule } from './users/users.module';
 import { MessagesModule } from './messages/messages.module';
+import { PresenceModule } from './presence/presence.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { MessagesModule } from './messages/messages.module';
     AuthModule,
     UsersModule,
     MessagesModule,
+    PresenceModule,
   ],
 })
 export class AppModule {}

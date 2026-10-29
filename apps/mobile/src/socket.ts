@@ -4,13 +4,30 @@ import { API_BASE_URL } from './config';
 /**
  * مدیریت اتصال Socket.IO — یک نمونه مشترک برای کل اپ
  * سرور در handshake توکن access را اعتبارسنجی می‌کند؛ در صورت قطع، خودکار وصل می‌شود.
+ * heartbeat حضور هر ۲۵ ثانیه (گام ۳) — TTL کلید online سرور ۷۵ ثانیه است.
  */
 let socket: Socket | null = null;
 let currentToken: string | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function startHeartbeat(s: Socket): void {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (s.connected) s.emit('presence.heartbeat');
+  }, 25_000);
+}
 
 export function connectSocket(token: string): Socket {
   if (socket && currentToken === token) return socket;
   socket?.disconnect();
+  stopHeartbeat();
   currentToken = token;
   socket = io(API_BASE_URL, {
     auth: { token },
@@ -19,6 +36,8 @@ export function connectSocket(token: string): Socket {
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
   });
+  socket.on('connect', () => startHeartbeat(socket as Socket));
+  socket.on('disconnect', () => stopHeartbeat());
   return socket;
 }
 
@@ -30,6 +49,7 @@ export function disconnectSocket(): void {
   socket?.disconnect();
   socket = null;
   currentToken = null;
+  stopHeartbeat();
 }
 
 /** uuid سبک برای client_msg_id — کافی و امن برای این منظور (نه امنیتی) */

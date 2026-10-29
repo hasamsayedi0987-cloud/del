@@ -41,7 +41,7 @@ export class MessagesController {
     return this.messages.getOne(req.user.sub, id);
   }
 
-  /** تاریخچه پیام‌ها با cursor (GET ?before=<seq>&limit=50) */
+  /** تاریخچه پیام‌ها — ?before=<seq> صفحه به عقب، ?since=<seq> همگام‌سازی آفلاین */
   @Get(':id/messages')
   listMessages(
     @Req() req: AuthedRequest,
@@ -50,6 +50,7 @@ export class MessagesController {
   ) {
     return this.messages.getMessages(req.user.sub, id, {
       before: q.before,
+      since: q.since,
       limit: q.limit,
     });
   }

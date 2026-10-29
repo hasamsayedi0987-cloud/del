@@ -112,3 +112,31 @@ export interface WsConversationNew {
   /** اعضای مکالمه (برای multi-device و اشکال‌زدایی) */
   participantUserIds: string[];
 }
+
+/** وضعیت حضور کاربر (گام ۳) */
+export interface PresenceDto {
+  userId: string;
+  online: boolean;
+  /** فقط وقتی offline — ISO timestamp */
+  lastSeen: string | null;
+}
+
+/** رویداد تغییر حضور (به اتاق شخصی هم‌مکالمه‌ها فرستاده می‌شود) */
+export interface WsPresenceUpdate {
+  userId: string;
+  online: boolean;
+  lastSeen: string | null;
+}
+
+/** رویداد «در حال نوشتن…» */
+export interface WsTyping {
+  conversationId: string;
+  userId: string;
+}
+
+/** رسید خواندن بلادرنگ — تا lastReadSeq خوانده شده */
+export interface WsMessageRead {
+  conversationId: string;
+  userId: string;
+  lastReadSeq: number;
+}
