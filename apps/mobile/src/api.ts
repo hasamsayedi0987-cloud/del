@@ -147,6 +147,38 @@ export const api = {
 
   getPresence: (token: string, userId: string) =>
     request<PresenceDto>(`/users/${userId}/presence`, { token }),
+
+  // ————— گروه‌ها (گام ۴) —————
+
+  createGroup: (token: string, title: string, memberUserIds: string[]) =>
+    request<ConversationDto>('/conversations/group', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ title, memberUserIds }),
+    }),
+
+  getConversation: (token: string, conversationId: string) =>
+    request<ConversationDto>(`/conversations/${conversationId}`, { token }),
+
+  addGroupMembers: (token: string, conversationId: string, userIds: string[]) =>
+    request<ConversationDto>(`/conversations/${conversationId}/members`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ userIds }),
+    }),
+
+  removeGroupMember: (token: string, conversationId: string, userId: string) =>
+    request<void>(`/conversations/${conversationId}/members/${userId}`, { method: 'DELETE', token }),
+
+  leaveGroup: (token: string, conversationId: string) =>
+    request<void>(`/conversations/${conversationId}/leave`, { method: 'POST', token }),
+
+  renameGroup: (token: string, conversationId: string, title: string) =>
+    request<ConversationDto>(`/conversations/${conversationId}`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ title }),
+    }),
 };
 
 function PlatformOS(): string {

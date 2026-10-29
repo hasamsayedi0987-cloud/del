@@ -92,6 +92,7 @@ model Participant {
   id             String   @id @default(uuid()) @db.Uuid
   conversationId String   @db.Uuid
   userId         String   @db.Uuid
+  role           String   @default("member") // member | admin (گروه‌ها — گام ۴)
   lastReadSeq    Int      @default(0)
   joinedAt       DateTime @default(now())
 

@@ -41,6 +41,7 @@ const USER_SELECT = { id: true, phone: true, displayName: true } as const;
 
 function toParticipantDto(p: {
   userId: string;
+  role: string;
   lastReadSeq: number;
   user: { id: string; phone: string; displayName: string | null };
 }): ParticipantDto {
@@ -49,6 +50,7 @@ function toParticipantDto(p: {
     displayName: p.user.displayName,
     phone: p.user.phone,
     lastReadSeq: p.lastReadSeq,
+    role: p.role as 'admin' | 'member',
   };
 }
 
@@ -126,19 +128,24 @@ export class MessagesService {
       },
     });
 
+    const isGroup = conv.type === 'group';
     return {
       id: conv.id,
-      type: conv.type as 'direct',
+      type: conv.type as 'direct' | 'group',
       title: conv.title,
       lastSeq: conv.lastSeq,
       lastMessageAt: conv.lastMessageAt?.toISOString() ?? null,
       createdAt: conv.createdAt.toISOString(),
-      peer:
-        conv.type === 'direct'
-          ? toParticipantDto(
-              conv.participants.find((p) => p.userId !== meId) ?? conv.participants[0]!,
-            )
-          : null,
+      peer: !isGroup
+        ? toParticipantDto(
+            conv.participants.find((p) => p.userId !== meId) ?? conv.participants[0]!,
+          )
+        : null,
+      memberCount: isGroup ? conv.participants.length : undefined,
+      myRole: isGroup ? (me.role as 'admin' | 'member') : null,
+      participants: isGroup
+        ? conv.participants.map((p) => toParticipantDto(p))
+        : undefined,
       unreadCount,
       lastMessage: conv.messages[0]
         ? {
@@ -174,19 +181,21 @@ export class MessagesService {
             serverSeq: { gt: part.lastReadSeq },
           },
         });
+        const isGroup = conv.type === 'group';
         const dto: ConversationDto = {
           id: conv.id,
-          type: conv.type as 'direct',
+          type: conv.type as 'direct' | 'group',
           title: conv.title,
           lastSeq: conv.lastSeq,
           lastMessageAt: conv.lastMessageAt?.toISOString() ?? null,
           createdAt: conv.createdAt.toISOString(),
-          peer:
-            conv.type === 'direct'
-              ? toParticipantDto(
-                  conv.participants.find((p) => p.userId !== meId) ?? conv.participants[0]!,
-                )
-              : null,
+          peer: !isGroup
+            ? toParticipantDto(
+                conv.participants.find((p) => p.userId !== meId) ?? conv.participants[0]!,
+              )
+            : null,
+          memberCount: isGroup ? conv.participants.length : undefined,
+          myRole: isGroup ? (part.role as 'admin' | 'member') : null,
           unreadCount,
           lastMessage: conv.messages[0]
             ? {
@@ -324,6 +333,175 @@ export class MessagesService {
       data: { lastReadSeq: lastReadSeq },
     });
     this.events.emit('conversation.read', { conversationId, userId: meId, lastReadSeq });
+  }
+
+  // ————— گروه‌ها (گام ۴) —————
+
+  /** ساخت گروه — سازنده ادمین می‌شود؛ شناسه‌های تکراری/خودِ سازنده حذف می‌شوند */
+  async createGroup(meId: string, title: string, memberUserIds: string[]): Promise<ConversationDto> {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      throw httpError(400, 'INVALID_TITLE', 'Group title is required');
+    }
+    const ids = [...new Set(memberUserIds.filter((id) => id !== meId))];
+    if (ids.length) {
+      const found = await this.prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } });
+      if (found.length !== ids.length) {
+        throw httpError(404, 'USER_NOT_FOUND', 'One or more member users do not exist');
+      }
+    }
+    const conv = await this.prisma.conversation.create({
+      data: {
+        type: 'group',
+        title: cleanTitle,
+        participants: {
+          create: [
+            { userId: meId, role: 'admin' },
+            ...ids.map((userId) => ({ userId, role: 'member' })),
+          ],
+        },
+      },
+    });
+    this.events.emit('conversation.created', {
+      conversationId: conv.id,
+      userIds: [meId, ...ids],
+    });
+    return this.getOne(meId, conv.id);
+  }
+
+  /** افزودن عضو به گروه — فقط ادمین؛ idempotent (عضو تکراری نادیده گرفته می‌شود) */
+  async addMembers(meId: string, conversationId: string, userIds: string[]): Promise<ConversationDto> {
+    const me = await this.requireAdmin(meId, conversationId);
+    void me;
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conv) throw httpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation does not exist');
+    if (conv.type !== 'group') {
+      throw httpError(400, 'NOT_A_GROUP', 'Members can only be added to group conversations');
+    }
+
+    const existing = await this.prisma.participant.findMany({
+      where: { conversationId, userId: { in: userIds } },
+      select: { userId: true },
+    });
+    const existingSet = new Set(existing.map((p) => p.userId));
+    const newIds = [...new Set(userIds)].filter((id) => !existingSet.has(id));
+
+    if (newIds.length) {
+      const found = await this.prisma.user.findMany({ where: { id: { in: newIds } }, select: { id: true } });
+      if (found.length !== newIds.length) {
+        throw httpError(404, 'USER_NOT_FOUND', 'One or more users do not exist');
+      }
+      await this.prisma.participant.createMany({
+        data: newIds.map((userId) => ({ conversationId, userId, role: 'member' })),
+      });
+      this.events.emit('conversation.members_added', {
+        conversationId,
+        userIds: newIds,
+        addedBy: meId,
+        allUserIds: await this.memberIds(conversationId),
+      });
+    }
+    return this.getOne(meId, conversationId);
+  }
+
+  /** حذف عضو از گروه — فقط ادمین؛ ادمین نمی‌تواند خودش را با این مسیر حذف کند (خروج بزنید) */
+  async removeMember(meId: string, conversationId: string, userId: string): Promise<void> {
+    await this.requireAdmin(meId, conversationId);
+    if (userId === meId) {
+      throw httpError(400, 'USE_LEAVE', 'Admins cannot remove themselves — use leave endpoint');
+    }
+    const target = await this.prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!target) throw httpError(404, 'MEMBER_NOT_FOUND', 'Target user is not a member');
+    await this.prisma.participant.delete({ where: { id: target.id } });
+    this.events.emit('conversation.member_removed', {
+      conversationId,
+      userId,
+      removedBy: meId,
+      left: false,
+    });
+  }
+
+  /** تغییر نقش عضو — فقط ادمین؛ نقش خود ادمین قابل تغییر نیست */
+  async updateMemberRole(
+    meId: string,
+    conversationId: string,
+    userId: string,
+    role: 'admin' | 'member',
+  ): Promise<void> {
+    await this.requireAdmin(meId, conversationId);
+    if (userId === meId) {
+      throw httpError(400, 'CANNOT_CHANGE_OWN_ROLE', 'Use leave or another admin');
+    }
+    const target = await this.prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!target) throw httpError(404, 'MEMBER_NOT_FOUND', 'Target user is not a member');
+    await this.prisma.participant.update({ where: { id: target.id }, data: { role } });
+  }
+
+  /** خروج از گروه — آخرین ادمین نمی‌تواند وقتی عضو دیگری هست خارج شود */
+  async leaveGroup(meId: string, conversationId: string): Promise<void> {
+    const me = await this.requireParticipant(meId, conversationId);
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conv) throw httpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation does not exist');
+
+    if (conv.type === 'group' && me.role === 'admin') {
+      const [adminCount, memberCount] = await Promise.all([
+        this.prisma.participant.count({ where: { conversationId, role: 'admin' } }),
+        this.prisma.participant.count({ where: { conversationId } }),
+      ]);
+      if (adminCount === 1 && memberCount > 1) {
+        throw httpError(400, 'LAST_ADMIN', 'Promote another admin before leaving');
+      }
+    }
+    await this.prisma.participant.delete({
+      where: { conversationId_userId: { conversationId, userId: meId } },
+    });
+    this.events.emit('conversation.member_removed', {
+      conversationId,
+      userId: meId,
+      removedBy: meId,
+      left: true,
+    });
+  }
+
+  /** تغییر نام گروه — فقط ادمین و فقط گروه */
+  async renameGroup(meId: string, conversationId: string, title: string): Promise<ConversationDto> {
+    await this.requireAdmin(meId, conversationId);
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      throw httpError(400, 'INVALID_TITLE', 'Group title is required');
+    }
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { title: cleanTitle },
+    });
+    this.events.emit('conversation.renamed', {
+      conversationId,
+      title: conv.title,
+      lastSeq: conv.lastSeq,
+      lastMessageAt: conv.lastMessageAt?.toISOString() ?? null,
+    });
+    return this.getOne(meId, conversationId);
+  }
+
+  private async memberIds(conversationId: string): Promise<string[]> {
+    const rows = await this.prisma.participant.findMany({
+      where: { conversationId },
+      select: { userId: true },
+    });
+    return rows.map((r) => r.userId);
+  }
+
+  /** بررسی ادمین بودن در گروه — 403 NOT_GROUP_ADMIN */
+  private async requireAdmin(meId: string, conversationId: string) {
+    const part = await this.requireParticipant(meId, conversationId);
+    if (part.role !== 'admin') {
+      throw httpError(403, 'NOT_GROUP_ADMIN', 'Only group admins can perform this action');
+    }
+    return part;
   }
 
   /** بررسی عضویت — 403 در صورت نبود عضویت */

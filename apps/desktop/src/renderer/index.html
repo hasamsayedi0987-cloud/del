@@ -42,7 +42,10 @@
     <div class="topbar">
       <button id="goProfile" class="link">پروفایل</button>
       <h2>گفتگوها</h2>
-      <button id="newChat" class="link accent">+ جدید</button>
+      <span class="topbar-actions">
+        <button id="newGroup" class="link accent">+ گروه</button>
+        <button id="newChat" class="link accent">+ جدید</button>
+      </span>
     </div>
     <div id="chatList" class="list"></div>
     <div class="status-row">
@@ -104,6 +107,19 @@
       <div id="newChatError" class="error"></div>
       <button id="newChatStart" class="primary">شروع گفتگو</button>
       <button id="newChatCancel" class="ghost">انصراف</button>
+    </div>
+  </div>
+
+  <!-- گفتگوی گروه جدید (گام ۴) -->
+  <div id="newGroupModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h1>گروه جدید</h1>
+      <p class="sub">عنوان گروه و شماره اعضا (با کاما یا فاصله جدا شده) را وارد کنید — شما ادمین گروه می‌شوید</p>
+      <input id="newGroupTitle" type="text" placeholder="نام گروه" />
+      <textarea id="newGroupPhones" rows="3" placeholder="۰۹۱۲…، ۰۹۱۳…"></textarea>
+      <div id="newGroupError" class="error"></div>
+      <button id="newGroupCreate" class="primary">ساخت گروه</button>
+      <button id="newGroupCancel" class="ghost">انصراف</button>
     </div>
   </div>
 

@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -15,6 +17,12 @@ import { JwtAuthGuard, AuthedRequest } from '../common/jwt-auth.guard';
 import { MessagesService } from './messages.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { ListMessagesQuery, MarkReadDto, SendMessageDto } from './dto/message.dto';
+import {
+  AddMembersDto,
+  CreateGroupDto,
+  UpdateGroupDto,
+  UpdateMemberRoleDto,
+} from './dto/group.dto';
 
 @ApiTags('conversations')
 @ApiBearerAuth()
@@ -75,5 +83,60 @@ export class MessagesController {
     @Body() dto: MarkReadDto,
   ): Promise<void> {
     await this.messages.markRead(req.user.sub, id, dto.lastReadSeq);
+  }
+
+  // ————— گروه‌ها (گام ۴) —————
+
+  /** ساخت گروه — سازنده ادمین می‌شود */
+  @Post('group')
+  createGroup(@Req() req: AuthedRequest, @Body() dto: CreateGroupDto) {
+    return this.messages.createGroup(req.user.sub, dto.title, dto.memberUserIds ?? []);
+  }
+
+  /** افزودن عضو — فقط ادمین */
+  @Post(':id/members')
+  @HttpCode(200)
+  addMembers(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() dto: AddMembersDto,
+  ) {
+    return this.messages.addMembers(req.user.sub, id, dto.userIds);
+  }
+
+  /** حذف عضو — فقط ادمین */
+  @Delete(':id/members/:userId')
+  @HttpCode(204)
+  async removeMember(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ): Promise<void> {
+    await this.messages.removeMember(req.user.sub, id, userId);
+  }
+
+  /** تغییر نقش عضو — فقط ادمین */
+  @Patch(':id/members/:userId')
+  @HttpCode(204)
+  async updateMemberRole(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() dto: UpdateMemberRoleDto,
+  ): Promise<void> {
+    await this.messages.updateMemberRole(req.user.sub, id, userId, dto.role);
+  }
+
+  /** خروج از گروه */
+  @Post(':id/leave')
+  @HttpCode(204)
+  async leaveGroup(@Req() req: AuthedRequest, @Param('id') id: string): Promise<void> {
+    await this.messages.leaveGroup(req.user.sub, id);
+  }
+
+  /** تغییر نام گروه — فقط ادمین */
+  @Patch(':id')
+  renameGroup(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: UpdateGroupDto) {
+    return this.messages.renameGroup(req.user.sub, id, dto.title);
   }
 }

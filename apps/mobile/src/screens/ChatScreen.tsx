@@ -15,7 +15,9 @@ import { theme } from '../theme';
 import type {
   ConversationDto,
   MessageDto,
+  ParticipantDto,
   PresenceDto,
+  WsMemberRemoved,
   WsMessageNew,
   WsMessageRead,
   WsPresenceUpdate,
@@ -42,11 +44,26 @@ export function ChatScreen({
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<LocalMsg>>(null);
 
+  // ————— گام ۴: گروه‌ها — جزئیات کامل (اعضا + نقش‌ها) —————
+  const isGroup = conversation.type === 'group';
+  const [groupDetail, setGroupDetail] = useState<ConversationDto | null>(null);
+  const members = groupDetail?.participants ?? conversation.participants ?? [];
+  const memberCount = groupDetail?.memberCount ?? conversation.memberCount ?? members.length;
+  const senderName = useCallback(
+    (senderId: string): string => {
+      if (!isGroup) return '';
+      const p: ParticipantDto | undefined = members.find((m) => m.userId === senderId);
+      return p?.displayName ?? p?.phone ?? 'عضو';
+    },
+    [isGroup, members],
+  );
+
   // ————— گام ۳: حضور + تایپینگ + رسید خواندن —————
   const peerId = conversation.peer?.userId ?? null;
   const [peerPresence, setPeerPresence] = useState<PresenceDto | null>(null);
-  const [peerTyping, setPeerTyping] = useState(false);
-  const [peerLastRead, setPeerLastRead] = useState<number>(conversation.peer?.lastReadSeq ?? 0);
+  const [typingName, setTypingName] = useState<string | null>(null);
+  /** بیشترین lastReadSeq سایر اعضا (در گروه: هر عضوی؛ در direct: طرف مقابل) */
+  const [maxOtherLastRead, setMaxOtherLastRead] = useState<number>(conversation.peer?.lastReadSeq ?? 0);
   const typingHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSent = useRef(0);
   const messagesRef = useRef<LocalMsg[]>([]);
@@ -82,6 +99,21 @@ export function ChatScreen({
       } catch {
         // نمایش خطا در گام‌های بعد
       }
+      // گروه: جزئیات کامل (اعضا/نقش‌ها) برای نام فرستنده‌ها
+      if (isGroup) {
+        try {
+          const detail = await api.getConversation(accessToken, convId);
+          if (!cancelled) {
+            setGroupDetail(detail);
+            const otherMax = (detail.participants ?? [])
+              .filter((p) => p.userId !== myUserId)
+              .reduce((mx, p) => Math.max(mx, p.lastReadSeq), 0);
+            setMaxOtherLastRead((prev) => Math.max(prev, otherMax));
+          }
+        } catch {
+          // ignore
+        }
+      }
     })();
 
     const s = getSocket();
@@ -108,14 +140,30 @@ export function ChatScreen({
       setPeerPresence({ userId: p.userId, online: p.online, lastSeen: p.lastSeen });
     };
     const onTyping = (t: WsTyping) => {
-      if (t.conversationId !== convId || t.userId !== peerId) return;
-      setPeerTyping(true);
+      if (t.conversationId !== convId || t.userId === myUserId) return;
+      if (!isGroup && t.userId !== peerId) return;
+      setTypingName(isGroup ? senderName(t.userId) : '');
       if (typingHideTimer.current) clearTimeout(typingHideTimer.current);
-      typingHideTimer.current = setTimeout(() => setPeerTyping(false), 4000);
+      typingHideTimer.current = setTimeout(() => setTypingName(null), 4000);
     };
     const onRead = (r: WsMessageRead) => {
-      if (r.conversationId !== convId || r.userId !== peerId) return;
-      setPeerLastRead((prev) => Math.max(prev, r.lastReadSeq));
+      if (r.conversationId !== convId || r.userId === myUserId) return;
+      setMaxOtherLastRead((prev) => Math.max(prev, r.lastReadSeq));
+    };
+    const onMemberRemoved = (p: WsMemberRemoved) => {
+      if (p.conversationId !== convId) return;
+      if (p.userId === myUserId) {
+        // حذف/خروج از همین گروه — به لیست برمی‌گردیم
+        onBack();
+        return;
+      }
+      // جزئیات گروه تازه شود (تعداد اعضا)
+      if (isGroup) {
+        void api
+          .getConversation(accessToken, convId)
+          .then(setGroupDetail)
+          .catch(() => undefined);
+      }
     };
     const onReconnect = () => {
       // بعد از اتصال مجدد: عضویت مجدد در اتاق + همگام‌سازی پیام‌های از دست رفته + حضور تازه
@@ -149,6 +197,7 @@ export function ChatScreen({
     s?.on('presence.update', onPresence);
     s?.on('typing', onTyping);
     s?.on('message.read', onRead);
+    s?.on('member.removed', onMemberRemoved);
     s?.on('connect', onReconnect);
     return () => {
       cancelled = true;
@@ -157,9 +206,10 @@ export function ChatScreen({
       s?.off('presence.update', onPresence);
       s?.off('typing', onTyping);
       s?.off('message.read', onRead);
+      s?.off('member.removed', onMemberRemoved);
       s?.off('connect', onReconnect);
     };
-  }, [accessToken, convId, peerId, upsert]);
+  }, [accessToken, convId, peerId, upsert, isGroup, myUserId, senderName]);
 
   const send = useCallback(async () => {
     const body = draft.trim();
@@ -241,16 +291,25 @@ export function ChatScreen({
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerName} numberOfLines={1}>
-            {conversation.peer?.displayName ?? conversation.peer?.phone ?? 'گفتگو'}
+            {isGroup
+              ? conversation.title ?? groupDetail?.title ?? 'گروه'
+              : conversation.peer?.displayName ?? conversation.peer?.phone ?? 'گفتگو'}
           </Text>
-          <Text style={[styles.headerStatus, peerTyping ? styles.headerTyping : null]} numberOfLines={1}>
-            {peerTyping
-              ? 'در حال نوشتن…'
-              : peerPresence?.online
-                ? 'آنلاین'
-                : peerPresence?.lastSeen
-                  ? `آخرین بازدید ${faRelative(peerPresence.lastSeen)}`
-                  : ' '}
+          <Text
+            style={[styles.headerStatus, typingName !== null ? styles.headerTyping : null]}
+            numberOfLines={1}
+          >
+            {typingName !== null
+              ? isGroup
+                ? `${typingName} در حال نوشتن…`
+                : 'در حال نوشتن…'
+              : isGroup
+                ? `${faNum(memberCount)} عضو${groupDetail?.myRole === 'admin' ? ' · شما ادمین هستید' : ''}`
+                : peerPresence?.online
+                  ? 'آنلاین'
+                  : peerPresence?.lastSeen
+                    ? `آخرین بازدید ${faRelative(peerPresence.lastSeen)}`
+                    : ' '}
           </Text>
         </View>
         <View style={{ width: 64 }} />
@@ -272,10 +331,12 @@ export function ChatScreen({
         contentContainerStyle={styles.list}
         renderItem={({ item }) => {
           const mine = item.senderId === myUserId;
-          const read = item.serverSeq <= peerLastRead;
+          const read = mine && item.serverSeq <= maxOtherLastRead;
+          const from = mine ? '' : senderName(item.senderId);
           return (
             <View style={[styles.bubbleRow, mine ? { justifyContent: 'flex-start' } : { justifyContent: 'flex-end' }]}>
               <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePeer]}>
+                {from ? <Text style={styles.senderName}>{from}</Text> : null}
                 <Text style={styles.bubbleText}>{item.body}</Text>
                 {mine && item.status === 'sending' ? <Text style={styles.status}>… در حال ارسال</Text> : null}
                 {mine && item.status === 'failed' ? <Text style={styles.statusFailed}>✗ ارسال نشد</Text> : null}
@@ -343,6 +404,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 4,
   },
   bubbleText: { color: '#EAF6FF', fontSize: 16, lineHeight: 24, textAlign: 'right' },
+  senderName: { color: theme.accent, fontSize: 12, fontWeight: '700', marginBottom: 2, textAlign: 'right' },
   status: { color: 'rgba(4,18,31,0.55)', fontSize: 11, marginTop: 2, textAlign: 'left' },
   statusFailed: { color: '#7f1d1d', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
   ticks: { color: 'rgba(4,18,31,0.6)', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
@@ -388,4 +450,9 @@ function faRelative(iso: string): string {
   if (h < 24) return `${fa(h)} ساعت پیش`;
   const d = Math.floor(h / 24);
   return `${fa(d)} روز پیش`;
+}
+
+/** عدد فارسی */
+function faNum(n: number): string {
+  return String(n).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)] ?? d);
 }

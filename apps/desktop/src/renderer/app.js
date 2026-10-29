@@ -71,11 +71,17 @@ let localMessages = []; // MessageDto[]
 
 // ————— گام ۳: حضور / تایپینگ / رسید خواندن —————
 let currentPeerId = null;
-let peerLastRead = 0;
 let typingHideTimer = null;
 let lastTypingSent = 0;
 let peerLastPresence = null; // PresenceDto
 let heartbeatTimer = null;
+
+// ————— گام ۴: گروه‌ها —————
+let isGroupChat = false;
+let groupMembers = []; // ParticipantDto[]
+let myGroupRole = null; // 'admin' | 'member'
+let maxOtherLastRead = 0; // بیشترین lastReadSeq سایر اعضا (تیک خوانده‌شد)
+let typingUserName = null;
 
 function faRelative(iso) {
   const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
@@ -90,6 +96,16 @@ function faRelative(iso) {
 function renderChatStatus() {
   const el = $('chatStatus');
   if (!el || !currentConv) return;
+  if (typingUserName !== null) {
+    el.textContent = isGroupChat ? `${typingUserName} در حال نوشتن…` : 'در حال نوشتن…';
+    el.className = 'chat-status typing';
+    return;
+  }
+  if (isGroupChat) {
+    el.textContent = `${faDigits(groupMembers.length)} عضو${myGroupRole === 'admin' ? ' · شما ادمین هستید' : ''}`;
+    el.className = 'chat-status';
+    return;
+  }
   if (peerLastPresence?.online) {
     el.textContent = 'آنلاین';
     el.className = 'chat-status online';
@@ -100,6 +116,28 @@ function renderChatStatus() {
     el.innerHTML = '&nbsp;';
     el.className = 'chat-status';
   }
+}
+
+/** جزئیات کامل گروه (اعضا + نقش‌ها) */
+async function refreshGroupDetail() {
+  if (!isGroupChat || !currentConv || !session) return;
+  try {
+    const detail = await apiCall(`/conversations/${currentConv.id}`, { token: session.accessToken });
+    groupMembers = detail.participants ?? [];
+    myGroupRole = detail.myRole ?? null;
+    const otherMax = groupMembers
+      .filter((p) => p.userId !== session.user.id)
+      .reduce((mx, p) => Math.max(mx, p.lastReadSeq ?? 0), 0);
+    maxOtherLastRead = Math.max(maxOtherLastRead, otherMax);
+    renderChatStatus();
+  } catch {
+    /* بی‌اهمیت */
+  }
+}
+
+function memberName(userId) {
+  const p = groupMembers.find((m) => m.userId === userId);
+  return p?.displayName ?? p?.phone ?? 'عضو';
 }
 
 async function refreshPeerPresence() {
@@ -200,10 +238,8 @@ function connectWs(token) {
     // پیش‌نمایش/شمارنده لیست هم به‌روز شود
     void renderChatList();
   });
-  // گفتگوی تازه‌ساخته‌شده توسط کاربر دیگر → رفرش لیست
-  socket.on('conversation.new', () => {
-    void renderChatList();
-  });
+  // گفتگوی تازه‌ساخته‌شده توسط کاربر دیگر → رفرش لیست (گام ۴: handler کامل در پایین)
+  socket.on('conversation.new', () => {});
   // ————— گام ۳ —————
   socket.on('presence.update', (p) => {
     if (p.userId === currentPeerId) {
@@ -212,19 +248,41 @@ function connectWs(token) {
     }
   });
   socket.on('typing', ({ conversationId, userId }) => {
-    if (!currentConv || conversationId !== currentConv.id || userId !== currentPeerId) return;
-    const el = $('chatStatus');
-    el.textContent = 'در حال نوشتن…';
-    el.className = 'chat-status typing';
+    if (!currentConv || conversationId !== currentConv.id || userId === session.user.id) return;
+    if (!isGroupChat && userId !== currentPeerId) return;
+    typingUserName = isGroupChat ? memberName(userId) : '';
+    renderChatStatus();
     if (typingHideTimer) clearTimeout(typingHideTimer);
     typingHideTimer = setTimeout(() => {
+      typingUserName = null;
       renderChatStatus();
     }, 4000);
   });
   socket.on('message.read', ({ conversationId, userId, lastReadSeq }) => {
-    if (!currentConv || conversationId !== currentConv.id || userId !== currentPeerId) return;
-    peerLastRead = Math.max(peerLastRead, lastReadSeq);
+    if (!currentConv || conversationId !== currentConv.id || userId === session.user.id) return;
+    maxOtherLastRead = Math.max(maxOtherLastRead, lastReadSeq);
     renderMessages();
+  });
+  // ————— گام ۴: گروه‌ها —————
+  socket.on('member.added', ({ conversationId, userId }) => {
+    if (!currentConv || conversationId !== currentConv.id) return;
+    void refreshGroupDetail();
+  });
+  socket.on('member.removed', ({ conversationId, userId, left }) => {
+    void renderChatList();
+    if (!currentConv || conversationId !== currentConv.id) return;
+    if (userId === session.user.id) {
+      alert(left ? 'شما از گروه خارج شدید' : 'شما از گروه حذف شدید');
+      currentConv = null;
+      void enterChats();
+      return;
+    }
+    void refreshGroupDetail();
+  });
+  // گفتگوی تازه (اضافه شدن به گروه) → عضویت در اتاق + رفرش
+  socket.on('conversation.new', (p) => {
+    if (p?.conversationId) socket.emit('conversation.join', { conversationId: p.conversationId });
+    void renderChatList();
   });
 }
 
@@ -247,16 +305,21 @@ async function renderChatList() {
     for (const c of convs) {
       const row = document.createElement('div');
       row.className = 'chat-row';
-      const name = c.peer?.displayName ?? c.peer?.phone ?? 'ناشناس';
+      const isGroup = c.type === 'group';
+      const name = isGroup
+        ? c.title ?? 'گروه'
+        : c.peer?.displayName ?? c.peer?.phone ?? 'ناشناس';
       row.innerHTML = `
-        <div class="avatar">${(name || '؟').trim().charAt(0)}</div>
+        <div class="avatar ${isGroup ? 'group' : ''}">${(name || '؟').trim().charAt(0)}</div>
         <div class="chat-meta">
           <div class="chat-name"></div>
           <div class="chat-preview"></div>
         </div>
         ${c.unreadCount > 0 ? `<div class="badge">${faDigits(c.unreadCount)}</div>` : ''}`;
       row.querySelector('.chat-name').textContent = name;
-      row.querySelector('.chat-preview').textContent = c.lastMessage?.body ?? 'بدون پیام';
+      row.querySelector('.chat-preview').textContent = isGroup
+        ? `${faDigits(c.memberCount ?? 0)} عضو${c.lastMessage ? ` · ${c.lastMessage.body}` : ''}`
+        : c.lastMessage?.body ?? 'بدون پیام';
       row.onclick = () => openChat(c);
       listEl.appendChild(row);
     }
@@ -289,19 +352,62 @@ $('newChatStart').onclick = async () => {
 };
 $('newChatPhone').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('newChatStart').click(); });
 
+// ————— گروه جدید (گام ۴) —————
+$('newGroup').onclick = () => {
+  $('newGroupError').textContent = '';
+  $('newGroupTitle').value = '';
+  $('newGroupPhones').value = '';
+  $('newGroupModal').classList.remove('hidden');
+  $('newGroupTitle').focus();
+};
+$('newGroupCancel').onclick = () => $('newGroupModal').classList.add('hidden');
+$('newGroupCreate').onclick = async () => {
+  $('newGroupError').textContent = '';
+  const title = $('newGroupTitle').value.trim();
+  const phones = $('newGroupPhones').value
+    .split(/[,،\s]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!title || !phones.length) {
+    $('newGroupError').textContent = 'عنوان گروه و حداقل یک شماره لازم است';
+    return;
+  }
+  try {
+    const users = await Promise.all(
+      phones.map((p) => apiCall(`/users/by-phone/${encodeURIComponent(p)}`, { token: session.accessToken })),
+    );
+    const conv = await apiCall('/conversations/group', {
+      method: 'POST',
+      token: session.accessToken,
+      body: { title, memberUserIds: users.map((u) => u.id) },
+    });
+    $('newGroupModal').classList.add('hidden');
+    openChat(conv);
+  } catch (e) {
+    $('newGroupError').textContent = e.code === 'USER_NOT_FOUND' ? 'یکی از شماره‌ها در دل نیست' : faError(e);
+  }
+};
+
 // ————— چت —————
 async function openChat(conv) {
   currentConv = conv;
   localMessages = [];
+  isGroupChat = conv.type === 'group';
+  groupMembers = [];
+  myGroupRole = null;
+  maxOtherLastRead = 0;
+  typingUserName = null;
   currentPeerId = conv.peer?.userId ?? null;
-  peerLastRead = conv.peer?.lastReadSeq ?? 0;
   peerLastPresence = null;
-  $('chatTitle').textContent = conv.peer?.displayName ?? conv.peer?.phone ?? 'گفتگو';
+  $('chatTitle').textContent = isGroupChat
+    ? conv.title ?? 'گروه'
+    : conv.peer?.displayName ?? conv.peer?.phone ?? 'گفتگو';
   $('chatStatus').innerHTML = '&nbsp;';
   $('msgList').innerHTML = '';
   $('msgInput').value = '';
   show('chat');
   $('msgInput').focus();
+  if (isGroupChat) void refreshGroupDetail();
   await loadHistory();
   // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
   socket?.emit('conversation.join', { conversationId: conv.id });
@@ -348,11 +454,20 @@ function renderMessages() {
     const mine = m.senderId === session.user.id;
     const div = document.createElement('div');
     div.className = `msg ${mine ? 'mine' : 'peer'}`;
-    div.textContent = m.body;
+    if (!mine && isGroupChat) {
+      const sender = document.createElement('span');
+      sender.className = 'msg-sender';
+      sender.textContent = memberName(m.senderId);
+      div.appendChild(sender);
+    }
+    const body = document.createElement('span');
+    body.className = 'msg-body';
+    body.textContent = m.body;
+    div.appendChild(body);
     if (mine) {
       const status = document.createElement('span');
       status.className = 'msg-status';
-      status.textContent = m.serverSeq <= peerLastRead ? '✓✓' : '✓';
+      status.textContent = m.serverSeq <= maxOtherLastRead ? '✓✓' : '✓';
       div.appendChild(status);
     }
     list.appendChild(div);

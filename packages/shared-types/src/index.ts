@@ -76,6 +76,8 @@ export interface ParticipantDto {
   displayName: string | null;
   phone: string;
   lastReadSeq: number;
+  /** نقش در گروه (گام ۴) — فقط گروه */
+  role?: 'admin' | 'member';
 }
 
 export interface ConversationDto {
@@ -87,6 +89,12 @@ export interface ConversationDto {
   createdAt: string;
   /** فقط در direct: طرف مقابل */
   peer: ParticipantDto | null;
+  /** تعداد اعضا — گروه‌ها */
+  memberCount?: number;
+  /** نقش من در این گروه (گام ۴) */
+  myRole?: 'admin' | 'member' | null;
+  /** اعضای کامل — فقط در پاسخ جزئیات (GET /:id) */
+  participants?: ParticipantDto[];
   /** تعداد پیام‌های خوانده‌نشده این کاربر */
   unreadCount: number;
   /** پیش‌نمایش آخرین پیام */
@@ -139,4 +147,25 @@ export interface WsMessageRead {
   conversationId: string;
   userId: string;
   lastReadSeq: number;
+}
+
+// ————— گروه‌ها (گام ۴) —————
+
+/** عضو تازه به گروه اضافه شد — به اتاق گروه + اتاق شخصی عضو تازه */
+export interface WsMemberAdded {
+  conversationId: string;
+  /** کاربر اضافه‌شده */
+  userId: string;
+  /** ادمینی که اضافه کرد */
+  addedBy: string;
+}
+
+/** عضو از گروه حذف/خارج شد — به اتاق گروه + اتاق شخصی عضو حذف‌شده */
+export interface WsMemberRemoved {
+  conversationId: string;
+  /** کاربر حذف‌شده */
+  userId: string;
+  removedBy: string;
+  /** true = خودش خارج شد */
+  left: boolean;
 }

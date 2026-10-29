@@ -181,3 +181,17 @@ button.small-btn { width: auto; margin: 4px auto 0; padding: 8px 16px; font-size
   width: 100%; max-width: 380px; background: var(--surface-alt);
   border: 1px solid var(--border); border-radius: 14px; padding: 20px;
 }
+
+/* ————— گام ۴: گروه‌ها ————— */
+.topbar-actions { display: flex; gap: 6px; align-items: center; }
+.avatar.group { border-radius: 12px; }
+.msg-sender {
+  display: block; font-size: 11px; font-weight: 700;
+  color: var(--accent); margin-bottom: 2px;
+}
+.modal-card textarea {
+  width: 100%; margin-top: 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-family: inherit; font-size: 15px;
+  padding: 10px 14px; resize: vertical;
+}

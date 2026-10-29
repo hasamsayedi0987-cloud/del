@@ -11,7 +11,15 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
-import type { MessageDto, WsMessageNew, WsConversationNew, WsTyping, WsPresenceUpdate } from '@del/shared-types';
+import type {
+  MessageDto,
+  WsConversationNew,
+  WsMemberAdded,
+  WsMemberRemoved,
+  WsMessageNew,
+  WsTyping,
+  WsPresenceUpdate,
+} from '@del/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { MessagesService } from './messages.service';
 import { PresenceService } from '../presence/presence.service';
@@ -252,6 +260,76 @@ export class MessagesGateway
       this.server?.to(room(payload.conversationId)).emit('message.read', payload);
     };
     this.events.on('conversation.read', this.onConversationRead);
+
+    // عضو تازه — به اتاق گروه + اتاق شخصی خودش (تا UI رفرش و join کند)
+    this.onMembersAdded = (p: {
+      conversationId: string;
+      userIds: string[];
+      addedBy: string;
+      allUserIds: string[];
+    }) => {
+      const convNew: WsConversationNew = {
+        conversationId: p.conversationId,
+        participantUserIds: p.allUserIds,
+      };
+      for (const userId of p.userIds) {
+        const added: WsMemberAdded = {
+          conversationId: p.conversationId,
+          userId,
+          addedBy: p.addedBy,
+        };
+        this.server?.to(room(p.conversationId)).emit('member.added', added);
+        this.server?.to(userRoom(userId)).emit('conversation.new', convNew);
+        // socketهای آنلاین عضو تازه را همان‌جا به اتاق گروه می‌بریم — بی‌نیاز از join سمت کلاینت
+        void this.server
+          ?.in(userRoom(userId))
+          .fetchSockets()
+          .then((sockets) => {
+            for (const s of sockets) s.join(room(p.conversationId));
+          });
+      }
+    };
+    this.events.on('conversation.members_added', this.onMembersAdded);
+
+    // حذف/خروج عضو — مهم: socketهای او را از اتاق گروه خارج می‌کنیم (توقف دریافت پیام‌های گروه)
+    this.onMemberRemoved = (p: {
+      conversationId: string;
+      userId: string;
+      removedBy: string;
+      left: boolean;
+    }) => {
+      const removed: WsMemberRemoved = {
+        conversationId: p.conversationId,
+        userId: p.userId,
+        removedBy: p.removedBy,
+        left: p.left,
+      };
+      this.server?.to(room(p.conversationId)).emit('member.removed', removed);
+      this.server?.to(userRoom(p.userId)).emit('member.removed', removed);
+      void this.server
+        ?.in(userRoom(p.userId))
+        .fetchSockets()
+        .then((sockets) => {
+          for (const s of sockets) s.leave(room(p.conversationId));
+        });
+    };
+    this.events.on('conversation.member_removed', this.onMemberRemoved);
+
+    // تغییر نام گروه — لیست‌ها رفرش شود
+    this.onConversationRenamed = (p: {
+      conversationId: string;
+      title: string | null;
+      lastSeq: number;
+      lastMessageAt: string | null;
+    }) => {
+      this.server?.to(room(p.conversationId)).emit('conversation.updated', {
+        conversationId: p.conversationId,
+        lastSeq: p.lastSeq,
+        lastMessageAt: p.lastMessageAt,
+      });
+      // اعضا برای دیدن عنوان تازه لیست را رفرش می‌کنند — همان رویداد updated کافی است
+    };
+    this.events.on('conversation.renamed', this.onConversationRenamed);
   }
 
   private onMessageCreated?: (message: MessageDto) => void;
@@ -264,6 +342,24 @@ export class MessagesGateway
     userId: string;
     lastReadSeq: number;
   }) => void;
+  private onMembersAdded?: (payload: {
+    conversationId: string;
+    userIds: string[];
+    addedBy: string;
+    allUserIds: string[];
+  }) => void;
+  private onMemberRemoved?: (payload: {
+    conversationId: string;
+    userId: string;
+    removedBy: string;
+    left: boolean;
+  }) => void;
+  private onConversationRenamed?: (payload: {
+    conversationId: string;
+    title: string | null;
+    lastSeq: number;
+    lastMessageAt: string | null;
+  }) => void;
 
   onModuleDestroy(): void {
     if (this.onMessageCreated) this.events.off('message.created', this.onMessageCreated);
@@ -271,6 +367,9 @@ export class MessagesGateway
       this.events.off('conversation.created', this.onConversationCreated);
     }
     if (this.onConversationRead) this.events.off('conversation.read', this.onConversationRead);
+    if (this.onMembersAdded) this.events.off('conversation.members_added', this.onMembersAdded);
+    if (this.onMemberRemoved) this.events.off('conversation.member_removed', this.onMemberRemoved);
+    if (this.onConversationRenamed) this.events.off('conversation.renamed', this.onConversationRenamed);
   }
 }
 
