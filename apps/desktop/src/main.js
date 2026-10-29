@@ -1,7 +1,7 @@
 /**
  * Del Desktop — Electron main process (Step 1)
  */
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, desktopCapturer, session } = require('electron');
 const path = require('node:path');
 
 app.disableHardwareAcceleration = app.disableHardwareAcceleration; // no-op safeguard
@@ -35,6 +35,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // گام ۶: مجوز اشتراک صفحه برای تماس — اولین نمایشگر
+  session.defaultSession.setDisplayMediaRequestHandler((_opts, callback) => {
+    void desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then((sources) => {
+        if (sources.length && sources[0]) callback({ video: sources[0] });
+        else callback({});
+      })
+      .catch(() => callback({}));
+  });
+
   createWindow();
 
   app.on('activate', () => {

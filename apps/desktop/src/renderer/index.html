@@ -61,7 +61,10 @@
         <h2 id="chatTitle">گفتگو</h2>
         <div id="chatStatus" class="chat-status">&nbsp;</div>
       </div>
-      <span></span>
+      <span class="topbar-actions">
+        <button id="callAudio" class="link accent call-btn hidden" title="تماس صوتی">📞</button>
+        <button id="callVideo" class="link accent call-btn hidden" title="تماس تصویری">🎥</button>
+      </span>
     </div>
     <button id="loadOlder" class="ghost small-btn hidden">پیام‌های قدیمی‌تر…</button>
     <div id="msgList" class="msg-list"></div>
@@ -125,7 +128,27 @@
     </div>
   </div>
 
+  <!-- لایه تماس (گام ۶) -->
+  <div id="callOverlay" class="call-overlay hidden">
+    <video id="callRemoteVideo" class="call-remote-video hidden" autoplay playsinline></video>
+    <video id="callLocalVideo" class="call-local-video hidden" autoplay playsinline muted></video>
+    <div id="callInfo" class="call-info">
+      <div id="callAvatar" class="call-avatar">؟</div>
+      <div id="callPeerName" class="call-peer-name"></div>
+      <div id="callStateText" class="call-state-text"></div>
+      <button id="callScreenShare" class="ghost call-share hidden">اشتراک صفحه</button>
+    </div>
+    <div class="call-controls">
+      <button id="callAccept" class="call-circle accept hidden" title="پذیرش">✓</button>
+      <button id="callReject" class="call-circle reject hidden" title="رد">✕</button>
+      <button id="callMute" class="call-circle hidden" title="میکروفون">🎙</button>
+      <button id="callCam" class="call-circle hidden" title="دوربین">📷</button>
+      <button id="callHangup" class="call-circle reject hidden" title="پایان تماس">✕</button>
+    </div>
+  </div>
+
   <script src="vendor/socket.io.min.js"></script>
+  <script src="vendor/livekit-client.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-# محیط توسعه محلی دل — postgres + redis + minio
+# محیط توسعه محلی دل — postgres + redis + minio + livekit
 # Usage: docker compose -f infrastructure/docker-compose.dev.yml up -d
 
 services:
@@ -62,6 +62,19 @@ services:
       mc alias set local http://minio:9000 del_minio del_dev_minio_password &&
       mc mb --ignore-existing local/del-media &&
       echo 'bucket del-media ready'"
+
+  # سرور SFU تماس‌های صوتی/تصویری (گام ۶) — حالت dev با کلید ثابت
+  # API با این مقادیر بوت شود: LIVEKIT_URL=ws://localhost:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret-0123456789abcdef0123456789abcdef
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: del-livekit
+    command: ["--dev", "--bind", "0.0.0.0"]
+    environment:
+      LIVEKIT_KEYS: "devkey: devsecret-0123456789abcdef0123456789abcdef"
+    ports:
+      - "7880:7880"      # WebSocket signaling
+      - "7881:7881"      # TCP fallback مدیا
+      - "7882:7882/udp"  # RTC over UDP
 
 volumes:
   del_pgdata:

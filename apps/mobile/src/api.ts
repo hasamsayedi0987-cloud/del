@@ -1,6 +1,9 @@
 import { API_BASE_URL } from './config';
 import type {
   AuthSession,
+  CallDto,
+  CallJoinInfo,
+  CallPage,
   ConversationDto,
   MediaAssetDto,
   MediaUrlResponse,
@@ -227,6 +230,36 @@ export const api = {
 
   getMediaUrl: (token: string, mediaId: string, variant: 'thumb' | 'original' = 'original') =>
     request<MediaUrlResponse>(`/media/${mediaId}/url?variant=${variant}`, { token }),
+
+  // ————— تماس‌ها (گام ۶) —————
+
+  startCall: (token: string, conversationId: string, kind: 'audio' | 'video') =>
+    request<CallDto>('/calls', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ conversationId, kind }),
+    }),
+
+  acceptCall: (token: string, callId: string) =>
+    request<CallJoinInfo>(`/calls/${callId}/accept`, { method: 'POST', token }),
+
+  rejectCall: (token: string, callId: string) =>
+    request<void>(`/calls/${callId}/reject`, { method: 'POST', token }),
+
+  cancelCall: (token: string, callId: string) =>
+    request<void>(`/calls/${callId}/cancel`, { method: 'POST', token }),
+
+  endCall: (token: string, callId: string) =>
+    request<CallDto>(`/calls/${callId}/end`, { method: 'POST', token }),
+
+  listCalls: (token: string, conversationId?: string, before?: string, limit?: number) => {
+    const params: string[] = [];
+    if (conversationId) params.push(`conversationId=${conversationId}`);
+    if (before) params.push(`before=${encodeURIComponent(before)}`);
+    if (limit) params.push(`limit=${limit}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
+    return request<CallPage>(`/calls${qs}`, { token });
+  },
 };
 
 function PlatformOS(): string {

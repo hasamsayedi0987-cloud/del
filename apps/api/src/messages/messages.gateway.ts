@@ -12,7 +12,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import type {
+  CallDto,
   MessageDto,
+  WsCallAccepted,
+  WsCallEnded,
+  WsCallIncoming,
   WsConversationNew,
   WsMemberAdded,
   WsMemberRemoved,
@@ -341,10 +345,76 @@ export class MessagesGateway
       this.server?.to(room(p.conversationId)).emit('media.ready', p);
     };
     this.events.on('media.ready', this.onMediaReady);
+
+    // ————— گام ۶: تماس‌ها — signaling روی اتاق شخصی (همه دستگاه‌های طرفین) —————
+    // زنگ خوردن — فقط گیرنده می‌شنود
+    this.onCallIncoming = (p: WsCallIncoming & { notifyUserId: string }) => {
+      const payload: WsCallIncoming = { call: p.call, caller: p.caller };
+      this.server?.to(userRoom(p.notifyUserId)).emit('call.incoming', payload);
+    };
+    this.events.on('call.incoming', this.onCallIncoming);
+
+    // پاسخ داده شد — هر طرف توکن LiveKit خودش را می‌گیرد
+    this.onCallAccepted = (p: {
+      call: CallDto;
+      url: string;
+      room: string;
+      tokens: Record<string, string>;
+      notifyUserIds: string[];
+    }) => {
+      for (const userId of p.notifyUserIds) {
+        const payload: WsCallAccepted = {
+          call: p.call,
+          url: p.url,
+          token: p.tokens[userId] ?? '',
+          room: p.room,
+        };
+        this.server?.to(userRoom(userId)).emit('call.accepted', payload);
+      }
+    };
+    this.events.on('call.accepted', this.onCallAccepted);
+
+    // پایان تماس — هر دو طرف
+    this.onCallEnded = (p: {
+      callId: string;
+      conversationId: string;
+      reason: WsCallEnded['reason'];
+      by: string;
+      durationS: number | null;
+      notifyUserIds: string[];
+    }) => {
+      const payload: WsCallEnded = {
+        callId: p.callId,
+        conversationId: p.conversationId,
+        reason: p.reason,
+        by: p.by,
+        durationS: p.durationS,
+      };
+      for (const userId of p.notifyUserIds) {
+        this.server?.to(userRoom(userId)).emit('call.ended', payload);
+      }
+    };
+    this.events.on('call.ended', this.onCallEnded);
   }
 
   private onMessageCreated?: (message: MessageDto) => void;
   private onMediaReady?: (payload: { conversationId: string; media: unknown }) => void;
+  private onCallIncoming?: (payload: WsCallIncoming & { notifyUserId: string }) => void;
+  private onCallAccepted?: (payload: {
+    call: CallDto;
+    url: string;
+    room: string;
+    tokens: Record<string, string>;
+    notifyUserIds: string[];
+  }) => void;
+  private onCallEnded?: (payload: {
+    callId: string;
+    conversationId: string;
+    reason: WsCallEnded['reason'];
+    by: string;
+    durationS: number | null;
+    notifyUserIds: string[];
+  }) => void;
   private onConversationCreated?: (payload: {
     conversationId: string;
     userIds: string[];
@@ -376,6 +446,9 @@ export class MessagesGateway
   onModuleDestroy(): void {
     if (this.onMessageCreated) this.events.off('message.created', this.onMessageCreated);
     if (this.onMediaReady) this.events.off('media.ready', this.onMediaReady);
+    if (this.onCallIncoming) this.events.off('call.incoming', this.onCallIncoming);
+    if (this.onCallAccepted) this.events.off('call.accepted', this.onCallAccepted);
+    if (this.onCallEnded) this.events.off('call.ended', this.onCallEnded);
     if (this.onConversationCreated) {
       this.events.off('conversation.created', this.onConversationCreated);
     }

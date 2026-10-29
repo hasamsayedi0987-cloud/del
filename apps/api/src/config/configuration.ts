@@ -29,6 +29,17 @@ export interface AppConfig {
   mediaMaxFileBytes: number;
   /** آیا پیکربندی storage رسانه کامل است؟ */
   mediaConfigured: boolean;
+  // ————— تماس‌ها (گام ۶) — LiveKit SFU —————
+  /** آدرس WebSocket سرور LiveKit که به کلاینت‌ها داده می‌شود (wss://… یا ws://…) */
+  livekitUrl: string | undefined;
+  livekitApiKey: string | undefined;
+  livekitApiSecret: string | undefined;
+  /** عمر توکن LiveKit */
+  livekitTokenTtlSec: number;
+  /** سقف زمان زنگ خوردن بدون پاسخ */
+  callRingTimeoutSec: number;
+  /** آیا پیکربندی تماس کامل است؟ */
+  callsConfigured: boolean;
 }
 
 export const appConfig = {
@@ -62,6 +73,12 @@ export const appConfig = {
       mediaMaxImageBytes: Number(env.MEDIA_MAX_IMAGE_MB ?? 25) * 1024 * 1024,
       mediaMaxFileBytes: Number(env.MEDIA_MAX_FILE_MB ?? 1024) * 1024 * 1024,
       mediaConfigured: Boolean(env.S3_ENDPOINT && env.S3_ACCESS_KEY && env.S3_SECRET_KEY),
+      livekitUrl: env.LIVEKIT_URL,
+      livekitApiKey: env.LIVEKIT_API_KEY,
+      livekitApiSecret: env.LIVEKIT_API_SECRET,
+      livekitTokenTtlSec: Number(env.LIVEKIT_TOKEN_TTL_SEC ?? 3600),
+      callRingTimeoutSec: Number(env.CALL_RING_TIMEOUT_SEC ?? 45),
+      callsConfigured: Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET),
     };
   },
 };

@@ -62,8 +62,25 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?must set}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       MEDIA_SIGNED_URL_TTL_SEC: ${MEDIA_SIGNED_URL_TTL_SEC:-300}
+      # ————— تماس‌ها (گام ۶) — LiveKit —————
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret-0123456789abcdef0123456789abcdef}
     ports:
       - "${API_PORT:-3000}:3000"
+
+  # SFU تماس‌های صوتی/تصویری (گام ۶)
+  # برای انتشار عمومی: دامنه + TLS (wss) و coturn برای کلاینت‌های پشت NAT سخت — docs/08-operations.md
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: ["--dev", "--bind", "0.0.0.0"]  # پروداکشن: فایل config کامل با turn — docs/08-operations.md
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret-0123456789abcdef0123456789abcdef}"
+    ports:
+      - "7880:7880"        # WebSocket signaling (در پروداکشن پشت reverse proxy با wss)
+      - "7881:7881"        # TCP fallback مدیا
+      - "7882:7882/udp"    # RTC over UDP
 
   # ذخیره‌سازی رسانه (گام ۵) — bucket با سرویس minio-init ساخته می‌شود
   minio:

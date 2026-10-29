@@ -63,11 +63,14 @@ export function ChatScreen({
   myUserId,
   conversation,
   onBack,
+  onRequestCall,
 }: {
   accessToken: string;
   myUserId: string;
   conversation: ConversationDto;
   onBack: () => void;
+  /** گام ۶: درخواست تماس صوتی/تصویری — فقط گفتگوهای ۱:۱ */
+  onRequestCall?: (conversation: ConversationDto, kind: 'audio' | 'video') => void;
 }) {
   const [messages, setMessages] = useState<LocalMsg[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -431,7 +434,27 @@ export function ChatScreen({
                     : ' '}
           </Text>
         </View>
-        <View style={{ width: 64 }} />
+        {/* گام ۶: دکمه‌های تماس — فقط گفتگوهای ۱:۱ */}
+        {!isGroup && onRequestCall ? (
+          <View style={styles.callBtns}>
+            <TouchableOpacity
+              style={styles.callBtn}
+              onPress={() => onRequestCall(conversation, 'audio')}
+              accessibilityLabel="تماس صوتی"
+            >
+              <Text style={styles.callBtnIcon}>📞</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.callBtn}
+              onPress={() => onRequestCall(conversation, 'video')}
+              accessibilityLabel="تماس تصویری"
+            >
+              <Text style={styles.callBtnIcon}>🎥</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={{ width: 64 }} />
+        )}
       </View>
 
       {hasMore ? (
@@ -513,6 +536,16 @@ const styles = StyleSheet.create({
   },
   back: { color: theme.accent, fontSize: 15, padding: 8 },
   headerCenter: { flex: 1, alignItems: 'center' },
+  callBtns: { flexDirection: 'row', gap: 6 },
+  callBtn: {
+    backgroundColor: theme.surface,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  callBtnIcon: { fontSize: 16 },
   headerName: { color: theme.text, fontSize: 17, fontWeight: '800' },
   headerStatus: { color: theme.textDim, fontSize: 12, marginTop: 2 },
   headerTyping: { color: theme.accent },

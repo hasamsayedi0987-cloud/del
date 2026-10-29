@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { MessagesModule } from './messages/messages.module';
 import { PresenceModule } from './presence/presence.module';
 import { MediaModule } from './media/media.module';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MediaModule } from './media/media.module';
     MessagesModule,
     PresenceModule,
     MediaModule,
+    CallsModule,
   ],
 })
 export class AppModule {}

@@ -83,6 +83,11 @@ let myGroupRole = null; // 'admin' | 'member'
 let maxOtherLastRead = 0; // بیشترین lastReadSeq سایر اعضا (تیک خوانده‌شد)
 let typingUserName = null;
 
+// ————— گام ۶: تماس —————
+let call = null; // { phase, callId, conversationId, kind, peerName, url?, token?, accepting? }
+let lkRoom = null; // LiveKit Room
+let lkAudioEls = []; // المان‌های صوتی attach‌شده
+
 function faRelative(iso) {
   const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
   const fa = (n) => faDigits(n);
@@ -279,10 +284,38 @@ function connectWs(token) {
     }
     void refreshGroupDetail();
   });
-  // گفتگوی تازه (اضافه شدن به گروه) → عضویت در اتاق + رفرش
-  socket.on('conversation.new', (p) => {
-    if (p?.conversationId) socket.emit('conversation.join', { conversationId: p.conversationId });
-    void renderChatList();
+  // ————— گام ۶: رویدادهای تماس —————
+  socket.on('call.incoming', (p) => {
+    if (call) return; // مشغول — سرور هم جلوی تماس دوم را می‌گیرد
+    call = {
+      phase: 'incoming',
+      callId: p.call.id,
+      conversationId: p.call.conversationId,
+      kind: p.call.kind,
+      peerName: p.caller.displayName ?? p.caller.phone ?? 'ناشناس',
+    };
+    renderCall();
+  });
+  socket.on('call.accepted', (p) => {
+    if (!call || call.callId !== p.call.id) return;
+    if (call.phase === 'outgoing') {
+      call.phase = 'active';
+      call.url = p.url;
+      call.token = p.token;
+      renderCall();
+      void connectLK();
+    } else if (call.phase === 'incoming' && !call.accepting) {
+      endCallLocal('تماس در دستگاه/پنجره دیگری پاسخ داده شد');
+    }
+  });
+  socket.on('call.ended', (p) => {
+    if (!call || call.callId !== p.callId) return;
+    let msg = 'تماس پایان یافت';
+    if (p.reason === 'timeout') msg = 'پاسخی داده نشد';
+    else if (p.reason === 'reject') msg = call.phase === 'outgoing' ? 'تماس رد شد' : 'تماس را رد کردید';
+    else if (p.reason === 'cancel') msg = 'تماس لغو شد';
+    else if (p.reason === 'hangup' && p.durationS != null) msg = `پایان تماس · ${faDigits(p.durationS)} ثانیه`;
+    endCallLocal(msg);
   });
 }
 
@@ -407,6 +440,10 @@ async function openChat(conv) {
   $('msgInput').value = '';
   show('chat');
   $('msgInput').focus();
+  // گام ۶: دکمه‌های تماس فقط در گفتگوهای ۱:۱
+  const direct = conv.type !== 'group';
+  $('callAudio').classList.toggle('hidden', !direct);
+  $('callVideo').classList.toggle('hidden', !direct);
   if (isGroupChat) void refreshGroupDetail();
   await loadHistory();
   // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
@@ -648,6 +685,228 @@ $('fileInput').addEventListener('change', async () => {
   }
 });
 
+// ————— گام ۶: تماس صوتی/تصویری — signaling روی WS، مدیا از LiveKit —————
+
+const LK = () => window.LivekitClient ?? null;
+
+function faCallError(e) {
+  switch (e.code) {
+    case 'CALLS_DISABLED': return 'سرور هنوز LiveKit را پیکربندی نکرده است';
+    case 'CALL_BUSY': return 'طرف مقابل در حال حاضر در تماس دیگری است';
+    case 'NOT_DIRECT': return 'فعلاً تماس فقط در گفتگوهای ۱:۱ ممکن است';
+    case 'INVALID_STATE': return 'این تماس دیگر قابل پاسخ/پایان نیست';
+    case 'CALL_NOT_FOUND': return 'این تماس دیگر وجود ندارد';
+    case 'NETWORK': return e.message;
+    default: return 'تماس ممکن نشد — دوباره تلاش کنید';
+  }
+}
+
+/** نمایش/به‌روزرسانی لایه تماس مطابق وضعیت */
+function renderCall() {
+  const overlay = $('callOverlay');
+  if (!call) { overlay.classList.add('hidden'); return; }
+  overlay.classList.remove('hidden');
+  $('callAvatar').textContent = (call.peerName || '؟').trim().charAt(0);
+  $('callPeerName').textContent = call.peerName;
+  const isVideo = call.kind === 'video';
+  const active = call.phase === 'active';
+  $('callAccept').classList.toggle('hidden', call.phase !== 'incoming');
+  $('callReject').classList.toggle('hidden', call.phase === 'active');
+  $('callMute').classList.toggle('hidden', !active);
+  $('callCam').classList.toggle('hidden', !active || !isVideo);
+  $('callHangup').classList.toggle('hidden', !active);
+  $('callScreenShare').classList.toggle('hidden', !active);
+  $('callRemoteVideo').classList.add('hidden');
+  if (active) {
+    $('callStateText').textContent = lkRoom && lkRoom.state === 'connected'
+      ? (isVideo ? 'تماس تصویری برقرار است' : 'تماس برقرار است')
+      : 'در حال اتصال…';
+  } else {
+    $('callStateText').textContent = call.phase === 'incoming'
+      ? `تماس ${isVideo ? 'تصویری' : 'صوتی'} ورودی…`
+      : 'در حال زنگ زدن…';
+  }
+}
+
+/** شروع تماس از هدر چت */
+async function startCall(kind) {
+  if (call || !currentConv || currentConv.type === 'group') return;
+  try {
+    const c = await apiCall('/calls', {
+      method: 'POST',
+      token: session.accessToken,
+      body: { conversationId: currentConv.id, kind },
+    });
+    call = {
+      phase: 'outgoing',
+      callId: c.id,
+      conversationId: c.conversationId,
+      kind,
+      peerName: $('chatTitle').textContent || 'گفتگو',
+    };
+    renderCall();
+  } catch (e) {
+    alert(faCallError(e));
+  }
+}
+
+/** اتصال به اتاق LiveKit پس از پاسخ */
+async function connectLK() {
+  const LKC = LK();
+  if (!LKC || !call || !call.url || !call.token) {
+    if (call) $('callStateText').textContent = 'این نسخه از تماس پشتیبانی نمی‌کند';
+    return;
+  }
+  try {
+    lkRoom = new LKC.Room({ adaptiveStream: true, dynacast: true });
+    lkRoom
+      .on('trackSubscribed', (track, pub) => {
+        if (track.kind === 'video' && pub.source === 'camera') {
+          const v = $('callRemoteVideo');
+          v.srcObject = new MediaStream([track.mediaStreamTrack]);
+          v.classList.remove('hidden');
+          $('callInfo').classList.add('compact');
+        } else if (track.kind === 'audio') {
+          const a = new Audio();
+          a.srcObject = new MediaStream([track.mediaStreamTrack]);
+          void a.play().catch(() => {});
+          lkAudioEls.push(a);
+        }
+      })
+      .on('trackUnsubscribed', (track, pub) => {
+        if (pub.source === 'camera') {
+          $('callRemoteVideo').classList.add('hidden');
+          $('callRemoteVideo').srcObject = null;
+        }
+      })
+      .on('participantDisconnected', () => {
+        $('callStateText').textContent = 'طرف مقابل خارج شد…';
+      })
+      .on('disconnected', () => {
+        // سرور call.ended می‌فرستد؛ UI فقط آماده باشد
+      });
+    await lkRoom.connect(call.url, call.token);
+    renderCall();
+    if (call.kind === 'video') {
+      const TrackSrc = LKC.Track?.Source?.Camera ?? 'camera';
+      await lkRoom.localParticipant.setCameraEnabled(true);
+      const pub = lkRoom.localParticipant.getTrackPublication(TrackSrc);
+      if (pub?.videoTrack) {
+        const lv = $('callLocalVideo');
+        lv.srcObject = new MediaStream([pub.videoTrack.mediaStreamTrack]);
+        lv.classList.remove('hidden');
+      }
+    }
+  } catch {
+    $('callStateText').textContent = 'اتصال تماس برقرار نشد';
+  }
+}
+
+/** جمع‌کردن اتاق LiveKit و المان‌های مدیا */
+function teardownLK() {
+  try { lkRoom?.disconnect(); } catch { /* بی‌اهمیت */ }
+  lkRoom = null;
+  for (const a of lkAudioEls) {
+    try { a.srcObject = null; } catch { /* بی‌اهمیت */ }
+  }
+  lkAudioEls = [];
+  $('callRemoteVideo').srcObject = null;
+  $('callRemoteVideo').classList.add('hidden');
+  $('callLocalVideo').srcObject = null;
+  $('callLocalVideo').classList.add('hidden');
+  $('callInfo').classList.remove('compact');
+}
+
+/** بستن تماس سمت کلاینت (سرور هم call.ended می‌فرستد) */
+function endCallLocal(msg) {
+  const had = call;
+  call = null;
+  teardownLK();
+  renderCall();
+  if (msg && had) alert(msg);
+}
+
+$('callAudio').onclick = () => void startCall('audio');
+$('callVideo').onclick = () => void startCall('video');
+
+$('callAccept').onclick = async () => {
+  if (!call || call.phase !== 'incoming') return;
+  try {
+    const info = await apiCall(`/calls/${call.callId}/accept`, { method: 'POST', token: session.accessToken });
+    call.accepting = true;
+    call.phase = 'active';
+    call.url = info.url;
+    call.token = info.token;
+    renderCall();
+    void connectLK();
+  } catch (e) {
+    endCallLocal(faCallError(e));
+  }
+};
+
+$('callReject').onclick = async () => {
+  if (!call) return;
+  const c = call;
+  endCallLocal(null);
+  try {
+    await apiCall(`/calls/${c.callId}/${c.phase === 'incoming' ? 'reject' : 'cancel'}`, {
+      method: 'POST', token: session.accessToken,
+    });
+  } catch { /* سرور با timeout هم تمیز می‌کند */ }
+};
+
+$('callHangup').onclick = async () => {
+  if (!call) return;
+  const c = call;
+  endCallLocal(null);
+  try { await apiCall(`/calls/${c.callId}/end`, { method: 'POST', token: session.accessToken }); }
+  catch { /* بی‌اهمیت */ }
+};
+
+$('callMute').onclick = async () => {
+  if (!lkRoom) return;
+  const pub = lkRoom.localParticipant.getTrackPublication?.('microphone');
+  const next = !(pub?.isMuted ?? false);
+  try {
+    await lkRoom.localParticipant.setMicrophoneEnabled(!pub?.isMuted);
+    $('callMute').classList.toggle('off', pub?.isMuted === true);
+    $('callMute').textContent = pub?.isMuted ? '🎙' : '🔇';
+  } catch { /* بی‌اهمیت */ }
+  void next;
+};
+
+$('callCam').onclick = async () => {
+  if (!lkRoom) return;
+  const pub = lkRoom.localParticipant.getTrackPublication?.('camera');
+  try {
+    await lkRoom.localParticipant.setCameraEnabled(pub?.isMuted ?? true);
+    const lv = $('callLocalVideo');
+    if (pub?.isMuted) {
+      const p2 = lkRoom.localParticipant.getTrackPublication?.('camera');
+      if (p2?.videoTrack) {
+        lv.srcObject = new MediaStream([p2.videoTrack.mediaStreamTrack]);
+        lv.classList.remove('hidden');
+      }
+    } else {
+      lv.srcObject = null;
+      lv.classList.add('hidden');
+    }
+    $('callCam').classList.toggle('off', !pub?.isMuted);
+  } catch { /* بی‌اهمیت */ }
+};
+
+// اشتراک صفحه (پروتوتایپ دسکتاپ) — handler اصلی در src/main.js
+$('callScreenShare').onclick = async () => {
+  if (!lkRoom) return;
+  try {
+    const on = lkRoom.localParticipant.isScreenShareEnabled;
+    await lkRoom.localParticipant.setScreenShareEnabled(!on);
+    $('callScreenShare').textContent = !on ? 'قطع اشتراک صفحه' : 'اشتراک صفحه';
+  } catch {
+    alert('اشتراک صفحه ممکن نشد');
+  }
+};
+
 // ————— پروفایل —————
 $('goProfile').onclick = () => {
   $('hello').textContent = `سلام ${session.user.displayName ?? 'کاربر'} 👋`;
@@ -693,6 +952,7 @@ $('logout').onclick = async () => {
   const rt = store.get('refreshToken');
   if (rt && session) await apiCall('/auth/logout', { method: 'POST', body: { refreshToken: rt } }).catch(() => {});
   store.del('refreshToken');
+  endCallLocal(null);
   socket?.disconnect();
   socket = null;
   session = null;

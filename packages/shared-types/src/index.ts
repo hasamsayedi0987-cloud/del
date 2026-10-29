@@ -223,3 +223,78 @@ export interface WsMediaReady {
   conversationId: string;
   media: MediaAssetDto;
 }
+
+// ————— تماس‌ها (گام ۶) —————
+// signaling روی WS؛ صدا/تصویر از LiveKit (SFU) — بایت‌های مدیا از API عبور نمی‌کنند
+
+export type CallKind = 'audio' | 'video';
+
+export type CallStatus =
+  | 'ringing'
+  | 'active'
+  | 'ended'
+  | 'missed'
+  | 'rejected'
+  | 'cancelled';
+
+export type CallEndReason = 'hangup' | 'reject' | 'cancel' | 'timeout';
+
+export interface CallDto {
+  id: string;
+  conversationId: string;
+  callerId: string;
+  calleeId: string;
+  kind: CallKind;
+  status: CallStatus;
+  endReason: CallEndReason | null;
+  /** شروع زنگ */
+  startedAt: string;
+  /** لحظه برقراری (پاسخ طرف مقابل) */
+  connectedAt: string | null;
+  endedAt: string | null;
+  /** طول گفت‌وگوی مؤثر بر حسب ثانیه */
+  durationS: number | null;
+}
+
+/** تماس ورودی — به اتاق شخصی گیرنده فرستاده می‌شود */
+export interface WsCallIncoming {
+  call: CallDto;
+  caller: { id: string; displayName: string | null; phone: string };
+}
+
+/** تماس پاسخ داده شد — هر طرف توکن LiveKit خودش را می‌گیرد */
+export interface WsCallAccepted {
+  call: CallDto;
+  /** آدرس WebSocket سرور LiveKit */
+  url: string;
+  /** توکن اتصال LiveKit (JWT یک‌ساعته) */
+  token: string;
+  /** نام اتاق LiveKit — call:{callId} */
+  room: string;
+}
+
+/** تماس تمام شد — به اتاق شخصی هر دو طرف */
+export interface WsCallEnded {
+  callId: string;
+  conversationId: string;
+  reason: CallEndReason;
+  /** کاربری که تماس را تمام کرد */
+  by: string;
+  durationS: number | null;
+}
+
+/** پاسخ REST شروع/پذیرش تماس — شامل اطلاعات اتصال LiveKit */
+export interface CallJoinInfo {
+  call: CallDto;
+  url: string;
+  token: string;
+  room: string;
+}
+
+/** تاریخچه تماس — GET /calls */
+export interface CallPage {
+  calls: CallDto[];
+  hasMore: boolean;
+  /** ISO cursor برای صفحه بعد (قدیمی‌تر) */
+  nextBefore: string | null;
+}

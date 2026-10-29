@@ -7,6 +7,15 @@
     "scheme": "del",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
+    "plugins": [
+      [
+        "@livekit/react-native",
+        {
+          "microphonePermission": "دل برای تماس صوتی به میکروفون نیاز دارد",
+          "cameraPermission": "دل برای تماس تصویری به دوربین نیاز دارد"
+        }
+      ]
+    ],
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
