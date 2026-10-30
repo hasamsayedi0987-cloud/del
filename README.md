@@ -1,7 +1,7 @@
 # دل (Del) — پیام‌رسان امن چندسکویی
 
 > iOS · Android · Windows · macOS — «دل»، بیش از یک گفت‌وگو (Del — More Than a Chat)
-> وضعیت فعلی: **گام ۶ از پیاده‌سازی — تماس صوتی/تصویری ۱:۱ (LiveKit) اجرا و تست‌شده** ✅
+> وضعیت فعلی: **گام ۷ از پیاده‌سازی — اعلان‌ها (push) + همگام‌سازی کامل چنددستگاهی اجرا و تست‌شده** ✅
 
 ## این مخزن چیست؟
 
@@ -18,7 +18,8 @@
 | **گام ۴** | **مکالمه‌های گروهی: ساخت گروه، اعضا، نقش ادمین، پیام گروهی بلادرنگ** | ✅ **اجرا و تست دود شد (۲۵/۲۵)** |
 | **گام ۵** | **رسانه: آپلود/دانلود Presigned (S3/MinIO)، magic bytes، بندانگشتی، پیام رسانه‌ای بلادرنگ** | ✅ **اجرا و تست دود شد (۳۲/۳۲)** |
 | **گام ۶** | **تماس صوتی/تصویری ۱:۱: signaling روی WS، توکن LiveKit، UI تماس کامل، تاریخچه، مشغولی، timeout** | ✅ **اجرا و تست دود شد (۴۴/۴۴)** |
-| گام ۷ | اعلان‌ها (push) + همگام‌سازی کامل + E2EE چت خصوصی (Signal) | ⬜ بعدی |
+| **گام ۷** | **اعلان‌ها: registry توکن push + providerهای Expo/webhook + اعلان بومی دسکتاپ + اعلان محلی موبایل + sync/bootstrap + sync/updates** | ✅ **اجرا و تست دود شد (۲۵/۲۵)** |
+| گام ۸ | رمزنگاری سرتاسری (E2EE) چت خصوصی + بازیابی حساب با کلید بازیابی | ⬜ بعدی |
 
 ### آنچه در گام ۱ واقعاً ساخته و تست شده است
 
@@ -81,6 +82,22 @@
 - **زیرساخت:** سرویس `livekit` در dev و prod compose (7880/7881/7882-udp)؛ بدون `LIVEKIT_*` آپ سرویس بالا می‌آید ولی تماس 503 می‌دهد
 - **تست دود ۴۴ سناریویی** — `scripts/smoke-step6.js` (شامل تأیید رمزنگاهی توکن، دو نمونه API موقت برای timeout و CALLS_DISABLED) — ۴۴/۴۴ سبز (رگرسیون گام‌های ۱ تا ۵ هم سبز — ۱۴۷ سناریو در کل)
 
+### آنچه در گام ۷ واقعاً ساخته و تست شده است
+
+- **مدیریت دستگاه‌ها و توکن push:** `GET /devices` · `POST /devices/push-token` (ثبت توکن روی دستگاه JWT با `did`) · `DELETE /devices/push-token` — توکن هرگز در پاسخ API/لاگ برنمی‌گردد (فقط وضعیت ثبت)
+- **سه provider اعلان:**
+  - **webhook** (`PUSH_WEBHOOK_URL`) — کل payload اعلان به URL اختصاصی POST می‌شود (تست خودکار و یکپارچه‌سازی اینفراستراکچر اختصاصی)
+  - **Expo Push** (`PUSH_EXPO_ENABLED`، پیش‌فرض روشن) — توکن‌های `ExpoPushToken[…]` به سرویس میزبانی‌شده Expo می‌روند (APNs/FCM زیر آن؛ بدون نیاز به کلید سروری)
+  - **console** — حالت توسعه بدون پیکربندی: فقط لاگ
+- **قاعده ارسال هوشمند:** push فقط برای کاربرِ بدون socket زنده WS (`gateway.isUserOnline` — دقیق‌تر از presence با TTL)؛ اگر اپ روشن باشد اعلان بلادرنگ خودش می‌رسد. تمایزی بین پیام و تماس نیست: `call.incoming` به گیرنده آفلاین هم push می‌خورد
+- **پاک‌سازی توکن مرده:** پاسخ `DeviceNotRegistered` از Expo → توکن خودکار از DB حذف می‌شود (معیار پذیرش نقشه راه)
+- **همگام‌سازی کامل چنددستگاهی:** `GET /sync/bootstrap` (دستگاه سوم تازه لاگین: پروفایل + همه مکالمه‌ها با unread و پیش‌نمایش یک‌جا) + `GET /sync/updates?since=<iso>` (فقط مکالمه‌های تغییریافته — پیام/نام/عضویت/خواندن) + ستون‌های `updatedAt` جدید روی Conversation/Participant با مهاجرت `sync_cursors`
+- **همگام‌سازی خوانده‌نشده چنددستگاهی:** خواندن در دستگاه اول → `message.read` به اتاق مکالمه و unread صفر در `sync/updates` برای دستگاه دوم (تست با دو socket هم‌زمان)
+- **اعلان بومی دسکتاپ:** preload امن با contextBridge (`window.delDesktop`) → اعلان Electron فقط وقتی پنجره فوکوس ندارد + **badge روی آیکون اپ** (مجموع unread) + تپ روی اعلان → فوکوس و بازشدن همان گفتگو؛ اعلان تماس ورودی هم وقتی پنجره جلو نیست
+- **اعلان موبایل:** `expo-notifications` + کانال‌های «پیام‌ها/تماس‌ها» اندروید + مجوز POST_NOTIFICATIONS؛ پیام WS در پس‌زمینه → اعلان محلی (بدون نیاز به سرویس بیرونی، در Expo Go کار می‌کند)؛ تماس ورودی پس‌زمینه → اعلان؛ **تپ روی اعلان → ناوبری به همان گفتگو** (با bootstrap)؛ ثبت توکن Expo Push اختیاری — با `extra.eas.projectId` فعال می‌شود و بدون آن اپ عادی کار می‌کند
+- **خروج تمیز:** خروج از حساب → حذف توکن push دستگاه (موبایل و دسکتاپ)
+- **تست دود ۲۵ سناریویی** — `scripts/smoke-step7.js` (سرور webhook ضبط‌کننده + نمونه API موقت با `PUSH_WEBHOOK_URL`) — ۲۵/۲۵ سبز (رگرسیون گام‌های ۱ تا ۶ هم سبز — **۱۷۲ سناریو در کل**)
+
 ## پشته فناوری
 
 | لایه | انتخاب |
@@ -90,6 +107,7 @@
 | بک‌اند | NestJS 10 (Modular Monolith) + Prisma 6 + PostgreSQL 16 + Redis 7 |
 | رسانه | Object Storage سازگار S3 (MinIO در dev) — Presigned URL از گام ۵ ✅ |
 | تماس | LiveKit (SFU) — signaling روی WS + توکن اختصاصی هر تماس از گام ۶ ✅ |
+| اعلان | Expo Push (iOS/Android) + webhook اختصاصی + اعلان بومی Electron — از گام ۷ ✅ |
 | CI/CD | GitHub Actions + Docker |
 | مدیریت مخزن | pnpm workspaces + Turborepo |
 
@@ -137,7 +155,7 @@ apps/            mobile (Expo) · desktop (Electron) · api (NestJS)
 packages/        shared-types (فعال) · validation · api-client · design-system · config
 docs/            ۹ سند فاز ۱ + docs/implementation/ (سند هر گام)
 infrastructure/  docker-compose.dev.yml · docker-compose.prod.yml
-scripts/         smoke-step1.sh تا smoke-step5.js (تست‌های دود)
+scripts/         smoke-step1.sh تا smoke-step7.js (تست‌های دود)
 ci/              سه workflow GitHub Actions (فعال‌سازی: ci/README.md)
 ```
 

@@ -10,6 +10,7 @@ import { MessagesModule } from './messages/messages.module';
 import { PresenceModule } from './presence/presence.module';
 import { MediaModule } from './media/media.module';
 import { CallsModule } from './calls/calls.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { CallsModule } from './calls/calls.module';
     PresenceModule,
     MediaModule,
     CallsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

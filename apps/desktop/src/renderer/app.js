@@ -88,6 +88,32 @@ let call = null; // { phase, callId, conversationId, kind, peerName, url?, token
 let lkRoom = null; // LiveKit Room
 let lkAudioEls = []; // المان‌های صوتی attach‌شده
 
+// ————— گام ۷: اعلان بومی + badge —————
+let chatListCache = []; // آخرین لیست گفتگوها برای عنوان اعلان و تپ
+
+function updateBadge() {
+  const total = chatListCache.reduce((s, c) => s + (c.unreadCount ?? 0), 0);
+  window.delDesktop?.setBadge(total);
+}
+
+function notifyDesktop({ title, body, conversationId, kind }) {
+  if (!window.delDesktop) return;
+  if (document.hasFocus()) return; // پنجره جلو است — اعلان لازم نیست
+  window.delDesktop.notify({ title, body, conversationId, kind });
+}
+
+function convDisplayName(c) {
+  return c?.type === 'group'
+    ? c.title ?? 'گروه'
+    : c?.peer?.displayName ?? c?.peer?.phone ?? 'پیام جدید';
+}
+
+window.delDesktop?.onNotifyClick((data) => {
+  if (!data?.conversationId) return;
+  const conv = chatListCache.find((c) => c.id === data.conversationId);
+  if (conv) openChat(conv);
+});
+
 function faRelative(iso) {
   const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
   const fa = (n) => faDigits(n);
@@ -215,6 +241,8 @@ function connectWs(token) {
       if (socket?.connected) socket.emit('presence.heartbeat');
     }, 25000);
     // بعد از اتصال مجدد: عضویت مجدد + همگام‌سازی آفلاین
+    // گام ۷: رفرش لیست هم — badge چنددستگاهی به‌روز شود
+    void renderChatList();
     if (currentConv) {
       socket.emit('conversation.join', { conversationId: currentConv.id });
       const realSeqs = localMessages.map((m) => m.serverSeq).filter((s) => s < Number.MAX_SAFE_INTEGER);
@@ -239,6 +267,14 @@ function connectWs(token) {
       void apiCall(`/conversations/${conversationId}/read`, {
         method: 'POST', token: session.accessToken, body: { lastReadSeq: message.serverSeq },
       }).catch(() => {});
+    } else if (message.senderId !== session.user.id) {
+      // گام ۷: پنجره فوکوس ندارد → اعلان بومی
+      notifyDesktop({
+        title: convDisplayName(chatListCache.find((c) => c.id === conversationId)),
+        body: message.body?.trim() ? message.body : 'پیام رسانه‌ای',
+        conversationId,
+        kind: 'message',
+      });
     }
     // پیش‌نمایش/شمارنده لیست هم به‌روز شود
     void renderChatList();
@@ -295,6 +331,13 @@ function connectWs(token) {
       peerName: p.caller.displayName ?? p.caller.phone ?? 'ناشناس',
     };
     renderCall();
+    // گام ۷: اگر پنجره فوکوس ندارد، اعلان تماس هم بزن
+    notifyDesktop({
+      title: call.peerName,
+      body: p.call.kind === 'video' ? '📞 تماس تصویری ورودی' : '📞 تماس صوتی ورودی',
+      conversationId: p.call.conversationId,
+      kind: 'call',
+    });
   });
   socket.on('call.accepted', (p) => {
     if (!call || call.callId !== p.call.id) return;
@@ -330,6 +373,8 @@ async function renderChatList() {
   listEl.innerHTML = '<p class="sub">در حال بارگذاری…</p>';
   try {
     const convs = await apiCall('/conversations', { token: session.accessToken });
+    chatListCache = convs;
+    updateBadge(); // گام ۷: badge آیکون اپ
     listEl.innerHTML = '';
     if (!convs.length) {
       listEl.innerHTML = '<p class="sub">هنوز گفتگویی ندارید — با «+ جدید» شروع کنید</p>';
@@ -951,7 +996,9 @@ $('saveName').onclick = async () => {
 $('logout').onclick = async () => {
   const rt = store.get('refreshToken');
   if (rt && session) await apiCall('/auth/logout', { method: 'POST', body: { refreshToken: rt } }).catch(() => {});
+  if (session) await apiCall('/devices/push-token', { method: 'DELETE', token: session.accessToken }).catch(() => {}); // گام ۷
   store.del('refreshToken');
+  window.delDesktop?.setBadge(0);
   endCallLocal(null);
   socket?.disconnect();
   socket = null;

@@ -1,7 +1,7 @@
 /**
- * Del Desktop — Electron main process (Step 1)
+ * Del Desktop — Electron main process (Step 1 + گام ۷: اعلان بومی و badge)
  */
-const { app, BrowserWindow, shell, desktopCapturer, session } = require('electron');
+const { app, BrowserWindow, shell, desktopCapturer, session, Notification, ipcMain } = require('electron');
 const path = require('node:path');
 
 app.disableHardwareAcceleration = app.disableHardwareAcceleration; // no-op safeguard
@@ -16,6 +16,7 @@ function createWindow() {
     backgroundColor: '#0A1628',
     autoHideMenuBar: true,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -44,6 +45,32 @@ app.whenReady().then(() => {
         else callback({});
       })
       .catch(() => callback({}));
+  });
+
+  // ————— گام ۷: اعلان بومی + badge —————
+  ipcMain.on('del:set-badge', (_event, count) => {
+    // badge روی آیکون — macOS و Unity لینوکس؛ سایر پلتفرم‌ها no-op
+    if (typeof app.setBadgeCount === 'function') app.setBadgeCount(Math.max(0, Number(count) || 0));
+  });
+
+  ipcMain.on('del:notify', (_event, payload) => {
+    const { title, body, conversationId, kind } = payload ?? {};
+    if (!Notification.isSupported() || !title) return;
+    const n = new Notification({
+      title: `دل — ${title}`,
+      body: body ?? '',
+      silent: kind === 'call' ? false : true,
+    });
+    n.on('click', () => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+        win.webContents.send('del:notify-click', { conversationId, kind });
+      }
+    });
+    n.show();
   });
 
   createWindow();

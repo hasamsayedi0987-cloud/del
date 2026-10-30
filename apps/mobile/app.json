@@ -14,6 +14,12 @@
           "microphonePermission": "دل برای تماس صوتی به میکروفون نیاز دارد",
           "cameraPermission": "دل برای تماس تصویری به دوربین نیاز دارد"
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#38BDF8"
+        }
       ]
     ],
     "splash": {
@@ -31,7 +37,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A1628"
-      }
+      },
+      "permissions": ["android.permission.POST_NOTIFICATIONS"]
     },
     "extra": {
       "eas": {

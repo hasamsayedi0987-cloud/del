@@ -120,6 +120,16 @@ export class MessagesGateway
   /** throttle رویداد typing به تفکیک socket */
   private readonly lastTypingAt = new Map<string, number>();
 
+  /**
+   * آیا این کاربر همین الان socket زنده دارد؟ (گام ۷)
+   * مبنای تصمیم ارسال push — دقیق‌تر از presence با TTL است؛
+   * اگر socket زنده باشد اعلان WebSocket خودش می‌رسد و push لازم نیست.
+   */
+  isUserOnline(userId: string): boolean {
+    const sockets = this.socketsByUser.get(userId);
+    return Boolean(sockets && sockets.size > 0);
+  }
+
   /** تغییر حضور را به اتاق شخصی همه هم‌مکالمه‌های کاربر می‌فرستد */
   private async broadcastPresence(userId: string): Promise<void> {
     const state = await this.presence.get(userId);

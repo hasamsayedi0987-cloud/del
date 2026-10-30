@@ -84,6 +84,8 @@ model Conversation {
   lastSeq       Int       @default(0)
   lastMessageAt DateTime?
   createdAt     DateTime  @default(now())
+  /** همگام‌سازی افزایشی (گام ۷) — با هر تغییر (پیام/نام/عضویت غیرمستقیم) به‌روز می‌شود */
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   participants Participant[]
   messages     Message[]
@@ -91,6 +93,7 @@ model Conversation {
   calls        Call[]
 
   @@index([lastMessageAt])
+  @@index([updatedAt])
 }
 
 model Participant {
@@ -100,12 +103,15 @@ model Participant {
   role           String   @default("member") // member | admin (گروه‌ها — گام ۴)
   lastReadSeq    Int      @default(0)
   joinedAt       DateTime @default(now())
+  /** همگام‌سازی افزایشی (گام ۷) — خواندن/تغییر نقش/پیوستن این سطر را تازه می‌کند */
+  updatedAt      DateTime @default(now()) @updatedAt
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, userId])
   @@index([userId])
+  @@index([updatedAt])
 }
 
 model Message {

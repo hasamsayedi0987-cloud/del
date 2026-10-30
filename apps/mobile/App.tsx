@@ -1,10 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StatusBar, View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { StatusBar, View, Text, StyleSheet, ActivityIndicator, Alert, AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from './src/api';
 import { connectSocket, disconnectSocket, getSocket } from './src/socket';
 import { theme } from './src/theme';
 import { setupCallGlobals } from './src/lk';
+import {
+  ensureAndroidChannels,
+  requestNotificationPermission,
+  registerExpoPushToken,
+  scheduleMessageNotification,
+  scheduleCallNotification,
+  onNotificationResponse,
+} from './src/notifications';
 import { LoginPhoneScreen } from './src/screens/LoginPhoneScreen';
 import { LoginOtpScreen } from './src/screens/LoginOtpScreen';
 import { ChatsScreen } from './src/screens/ChatsScreen';
@@ -44,6 +52,31 @@ export default function App() {
   }, [callState]);
   const acceptingRef = useRef<string | null>(null); // callId که همین دستگاه پاسخ داده
 
+  // ————— گام ۷: مسیر فعلی + کش گفتگوها برای عنوان اعلان‌ها —————
+  const routeRef = useRef<Route>(route);
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+  const convCacheRef = useRef<Map<string, ConversationDto>>(new Map());
+
+  /** بوت‌استرپ — همه گفتگوها یک‌جا؛ برای عنوان اعلان و ناوبری تپ */
+  const refreshConvCache = useCallback(async (token: string) => {
+    try {
+      const boot = await api.syncBootstrap(token);
+      const map = convCacheRef.current;
+      map.clear();
+      for (const c of boot.conversations) map.set(c.id, c);
+    } catch {
+      /* بعداً تلاش می‌شود */
+    }
+  }, []);
+
+  const titleOf = useCallback((conv: ConversationDto, senderId?: string): string => {
+    if (conv.type === 'group') return conv.title ?? 'گروه';
+    const peerName = conv.peer?.displayName ?? conv.peer?.phone ?? 'گفتگو';
+    return peerName;
+  }, []);
+
   // بوت: بازیابی نشست ذخیره‌شده
   useEffect(() => {
     (async () => {
@@ -80,6 +113,7 @@ export default function App() {
   }, []);
 
   const logout = useCallback(async () => {
+    if (accessToken) await api.deletePushToken(accessToken).catch(() => undefined); // گام ۷
     if (refreshToken) await api.logout(refreshToken).catch(() => undefined);
     disconnectSocket();
     await Promise.all([
@@ -91,7 +125,7 @@ export default function App() {
     setRefreshToken(null);
     setUser(null);
     setRoute({ name: 'login-phone' });
-  }, [refreshToken]);
+  }, [refreshToken, accessToken]);
 
   const sessionExpired = useCallback(async () => {
     // تلاش یک‌باره برای رفرش، وگرنه خروج
@@ -106,6 +140,102 @@ export default function App() {
       await logout();
     }
   }, [refreshToken, logout, persistSession]);
+
+  // ————— گام ۷: کانال‌ها + مجوز + ثبت توکن push (اختیاری — بدون projectId رد می‌شود) —————
+  useEffect(() => {
+    if (!accessToken) return;
+    void (async () => {
+      await ensureAndroidChannels();
+      const granted = await requestNotificationPermission();
+      if (!granted) return;
+      const pushToken = await registerExpoPushToken();
+      if (pushToken) {
+        await api.registerPushToken(accessToken, pushToken).catch(() => undefined);
+      }
+    })();
+  }, [accessToken]);
+
+  // ————— گام ۷: کش گفتگوها بعد از ورود/بوت —————
+  useEffect(() => {
+    if (!accessToken) return;
+    void refreshConvCache(accessToken);
+  }, [accessToken, refreshConvCache]);
+
+  // ————— گام ۷: اعلان محلی برای پیام WS در پس‌زمینه + cache از conversation.new —————
+  useEffect(() => {
+    if (!accessToken) return;
+    const s = getSocket();
+    if (!s) return;
+
+    const isViewing = (conversationId: string): boolean =>
+      routeRef.current.name === 'chat' && routeRef.current.conversation.id === conversationId;
+
+    const onMessageNew = (p: { conversationId: string; message: { senderId: string; body: string; type: string; clientMsgId: string } }) => {
+      if (isViewing(p.conversationId)) return; // ChatScreen خودش مدیریت می‌کند
+      if (AppState.currentState === 'active') return; // اپ جلو چشم — اعلان سیستم لازم نیست
+      const cached = convCacheRef.current.get(p.conversationId);
+      const title = cached
+        ? titleOf(cached, p.message.senderId)
+        : 'پیام جدید';
+      const body = p.message.body?.trim()
+        ? p.message.body
+        : p.message.type === 'text'
+          ? 'پیام جدید'
+          : '📎 پیام رسانه‌ای';
+      void scheduleMessageNotification(title, body, { conversationId: p.conversationId });
+    };
+
+    const onConvNew = () => {
+      void refreshConvCache(accessToken);
+    };
+
+    s.on('message.new', onMessageNew);
+    s.on('conversation.new', onConvNew);
+    return () => {
+      s.off('message.new', onMessageNew);
+      s.off('conversation.new', onConvNew);
+    };
+  }, [accessToken, refreshConvCache, titleOf]);
+
+  // ————— گام ۷: تماس ورودی در پس‌زمینه — اعلان محلی —————
+  useEffect(() => {
+    if (!accessToken) return;
+    const s = getSocket();
+    if (!s) return;
+    const onIncoming = (p: { call: { id: string; conversationId: string } ; caller: { displayName: string | null; phone: string } }) => {
+      if (callStateRef.current) return;
+      if (AppState.currentState === 'active') return; // CallScreen روبه‌روست
+      void scheduleCallNotification(p.caller.displayName ?? p.caller.phone ?? 'تماس ورودی', {
+        callId: p.call.id,
+        conversationId: p.call.conversationId,
+      });
+    };
+    s.on('call.incoming', onIncoming);
+    return () => {
+      s.off('call.incoming', onIncoming);
+    };
+  }, [accessToken]);
+
+  // ————— گام ۷: تپ روی اعلان → ناوبری به گفتگو —————
+  useEffect(() => {
+    if (!accessToken) return;
+    return onNotificationResponse((data) => {
+      if (data.conversationId) {
+        void (async () => {
+          const cached = convCacheRef.current.get(data.conversationId!);
+          if (cached) {
+            setRoute({ name: 'chat', conversation: cached });
+            return;
+          }
+          await refreshConvCache(accessToken);
+          const conv = convCacheRef.current.get(data.conversationId!);
+          setRoute(conv ? { name: 'chat', conversation: conv } : { name: 'chats' });
+        })();
+      } else {
+        setRoute({ name: 'chats' });
+      }
+    });
+  }, [accessToken, refreshConvCache]);
 
   // ————— گام ۶: signaling تماس روی WS —————
   useEffect(() => {

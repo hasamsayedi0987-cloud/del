@@ -5,10 +5,12 @@ import { PresenceModule } from '../presence/presence.module';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { MessagesGateway } from './messages.gateway';
+import { SyncController } from './sync.controller';
 
 @Module({
   imports: [AuthModule, PresenceModule, EventEmitterModule.forRoot()],
-  controllers: [MessagesController],
+  controllers: [MessagesController, SyncController],
   providers: [MessagesService, MessagesGateway],
+  exports: [MessagesGateway], // گام ۷ — NotificationsModule برای isUserOnline
 })
 export class MessagesModule {}

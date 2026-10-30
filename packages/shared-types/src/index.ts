@@ -298,3 +298,55 @@ export interface CallPage {
   /** ISO cursor برای صفحه بعد (قدیمی‌تر) */
   nextBefore: string | null;
 }
+
+// ————— اعلان‌ها و همگام‌سازی (گام ۷) —————
+
+/** دستگاه ثبت‌شده کاربر — GET /devices */
+export interface DeviceDto {
+  id: string;
+  platform: DevicePlatform | string;
+  name: string | null;
+  /** آیا توکن push ثبت شده است؟ (خود توکن هرگز به کلاینت برنمی‌گردد) */
+  pushRegistered: boolean;
+  lastActiveAt: string;
+  createdAt: string;
+}
+
+/** پاسخ POST /devices/push-token */
+export interface PushTokenResponse {
+  deviceId: string | null;
+  registered: boolean;
+}
+
+/** payload یک اعلان push سمت سرور — به provider (Expo/webhook) داده می‌شود */
+export interface DelPushPayload {
+  /** گیرنده (برای webhook) — هر دریافت‌کننده یک payload */
+  userId: string;
+  kind: 'message' | 'call';
+  title: string;
+  body: string;
+  /** payload سفارشی برای ناوبری کلاینت */
+  data: {
+    conversationId?: string;
+    messageId?: string;
+    callId?: string;
+    [k: string]: unknown;
+  };
+  /** توکن‌های push این کاربر که این بسته برای آن‌هاست */
+  tokens: string[];
+}
+
+/** پاسخ GET /sync/bootstrap — بوت‌استرپ کامل یک دستگاه تازه */
+export interface SyncBootstrap {
+  serverTime: string;
+  user: UserDto;
+  conversations: ConversationDto[];
+}
+
+/** پاسخ GET /sync/updates — فقط مکالمه‌های تغییریافته پس از since */
+export interface SyncUpdates {
+  serverTime: string;
+  conversations: ConversationDto[];
+  /** مکالمه‌هایی که دیگر عضوشان نیستید (اخراج/خروج در دستگاه دیگر) */
+  removedConversationIds: string[];
+}

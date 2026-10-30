@@ -5,12 +5,16 @@ import type {
   CallJoinInfo,
   CallPage,
   ConversationDto,
+  DeviceDto,
   MediaAssetDto,
   MediaUrlResponse,
   MessageDto,
   PresenceDto,
   PresignResponse,
+  PushTokenResponse,
   RequestOtpResponse,
+  SyncBootstrap,
+  SyncUpdates,
   UserDto,
 } from '@del/shared-types';
 
@@ -157,6 +161,29 @@ export const api = {
       token,
       body: JSON.stringify({ lastReadSeq }),
     }),
+
+  // ————— اعلان‌ها و همگام‌سازی (گام ۷) —————
+
+  /** ثبت/به‌روزرسانی توکن push این دستگاه */
+  registerPushToken: (token: string, pushToken: string) =>
+    request<PushTokenResponse>('/devices/push-token', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ token: pushToken }),
+    }),
+
+  /** حذف توکن push این دستگاه — هنگام خروج */
+  deletePushToken: (token: string) =>
+    request<PushTokenResponse>('/devices/push-token', { method: 'DELETE', token }),
+
+  listDevices: (token: string) => request<DeviceDto[]>('/devices', { token }),
+
+  /** بوت‌استرپ کامل — دستگاه تازه همه مکالمه‌ها را یک‌جا می‌گیرد */
+  syncBootstrap: (token: string) => request<SyncBootstrap>('/sync/bootstrap', { token }),
+
+  /** همگام‌سازی افزایشی — فقط مکالمه‌های تغییریافته پس از cursor */
+  syncUpdates: (token: string, since: string) =>
+    request<SyncUpdates>(`/sync/updates?since=${encodeURIComponent(since)}`, { token }),
 
   // ————— حضور (گام ۳) —————
 

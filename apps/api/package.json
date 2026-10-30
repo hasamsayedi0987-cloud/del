@@ -1,6 +1,6 @@
 {
   "name": "@del/api",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Del API — NestJS modular monolith (Step 1: auth foundation)",
   "scripts": {

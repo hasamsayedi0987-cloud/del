@@ -568,6 +568,68 @@ export class MessagesService {
     return this.getOne(meId, conversationId);
   }
 
+  // ————— همگام‌سازی چنددستگاهی (گام ۷) —————
+
+  /**
+   * بوت‌استرپ کامل یک دستگاه تازه — همه مکالمه‌ها با پیش‌نمایش و شمارنده خوانده‌نشده.
+   * تاریخچه خود هر مکالمه با GET /conversations/:id/messages بارگذاری می‌شود.
+   */
+  async syncBootstrap(meId: string): Promise<{
+    serverTime: string;
+    user: { id: string; phone: string; displayName: string | null; avatarUrl: string | null; about: string | null; createdAt: string };
+    conversations: ConversationDto[];
+  }> {
+    const user = await this.prisma.user.findUnique({ where: { id: meId } });
+    if (!user) throw httpError(404, 'USER_NOT_FOUND', 'User does not exist');
+    const conversations = await this.listMine(meId);
+    return {
+      serverTime: new Date().toISOString(),
+      user: {
+        id: user.id,
+        phone: user.phone,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        about: user.about,
+        createdAt: user.createdAt.toISOString(),
+      },
+      conversations,
+    };
+  }
+
+  /**
+   * همگام‌سازی افزایشی — فقط مکالمه‌هایی که پس از `since` تغییر کرده‌اند:
+   * پیام جدید / تغییر نام / تغییر عضویت هر عضو / تغییر خواندن خودم.
+   * مکالمه‌هایی که دیگر عضوشان نیستم در removedConversationIds برمی‌گردند
+   * (کلاینت با مقایسه لیست محلی حذف را تشخیص می‌دهد).
+   */
+  async syncUpdates(
+    meId: string,
+    since: Date,
+  ): Promise<{ serverTime: string; conversations: ConversationDto[]; removedConversationIds: string[] }> {
+    const serverTime = new Date().toISOString();
+    const myParts = await this.prisma.participant.findMany({
+      where: {
+        userId: meId,
+        OR: [
+          { conversation: { updatedAt: { gt: since } } },
+          { conversation: { participants: { some: { updatedAt: { gt: since } } } } },
+          { updatedAt: { gt: since } },
+        ],
+      },
+      select: { conversationId: true },
+    });
+    const conversations: ConversationDto[] = [];
+    for (const p of myParts) {
+      conversations.push(await this.getOne(meId, p.conversationId));
+    }
+    conversations.sort(
+      (a, b) =>
+        new Date(b.lastMessageAt ?? b.createdAt).getTime() -
+        new Date(a.lastMessageAt ?? a.createdAt).getTime(),
+    );
+    return { serverTime, conversations, removedConversationIds: [] };
+  }
+
   private async memberIds(conversationId: string): Promise<string[]> {
     const rows = await this.prisma.participant.findMany({
       where: { conversationId },

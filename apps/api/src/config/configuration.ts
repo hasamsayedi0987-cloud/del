@@ -40,6 +40,11 @@ export interface AppConfig {
   callRingTimeoutSec: number;
   /** آیا پیکربندی تماس کامل است؟ */
   callsConfigured: boolean;
+  // ————— اعلان‌ها (گام ۷) — Push —————
+  /** اگر تنظیم شود، payload اعلان به این URL هم POST می‌شود (تست/یکپارچه‌سازی خودمیزبان) */
+  pushWebhookUrl: string | undefined;
+  /** ارسال به سرویس Expo Push برای توکن‌های ExpoPushToken (پیش‌فرض روشن) */
+  pushExpoEnabled: boolean;
 }
 
 export const appConfig = {
@@ -79,6 +84,8 @@ export const appConfig = {
       livekitTokenTtlSec: Number(env.LIVEKIT_TOKEN_TTL_SEC ?? 3600),
       callRingTimeoutSec: Number(env.CALL_RING_TIMEOUT_SEC ?? 45),
       callsConfigured: Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET),
+      pushWebhookUrl: env.PUSH_WEBHOOK_URL,
+      pushExpoEnabled: (env.PUSH_EXPO_ENABLED ?? 'true') === 'true',
     };
   },
 };
