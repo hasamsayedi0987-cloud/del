@@ -303,3 +303,42 @@ button.small-btn { width: auto; margin: 4px auto 0; padding: 8px 16px; font-size
   word-break: break-all;
   margin-bottom: 12px;
 }
+
+/* ————— گام ۹: هوش مصنوعی ————— */
+.ai-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid #14304F;
+}
+.ai-chip {
+  background: rgba(125, 211, 252, 0.08);
+  border: 1px solid #38BDF8;
+  color: #7DD3FC;
+  border-radius: 16px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-chip:hover { background: rgba(125, 211, 252, 0.16); }
+.ai-chip-close { border-color: #40608A; color: #8FA8C8; max-width: none; }
+.msg-body-ai { cursor: context-menu; }
+.ai-modal-text {
+  white-space: pre-wrap;
+  line-height: 1.9;
+  max-height: 320px;
+  overflow-y: auto;
+  background: rgba(2, 12, 27, 0.45);
+  border: 1px solid #1E3A5F;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}

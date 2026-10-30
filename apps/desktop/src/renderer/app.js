@@ -53,8 +53,16 @@ const faError = (e) => {
     case 'OTP_EXPIRED': case 'OTP_NOT_FOUND': return 'کد منقضی یا ناموجود است؛ کد جدید بگیرید';
     case 'OTP_LOCKED': return 'تلاش‌های ناموفق زیاد بود؛ کد جدید بگیرید';
     case 'USER_NOT_FOUND': return 'کاربری با این شماره در دل نیست';
+    // گام ۹ — هوش مصنوعی
+    case 'AI_CONSENT_REQUIRED': return e.message;
+    case 'AI_RATE_LIMITED': return e.message;
+    case 'AI_PROVIDER_ERROR': return 'سرویس هوش مصنوعی موقتاً در دسترس نیست؛ دوباره تلاش کنید';
+    case 'AI_E2EE_UNAVAILABLE': return 'پیام‌های رمزنگاری‌شدهٔ سرتاسری قابل ترجمه نیستند';
+    case 'AI_NOTHING_TO_READ': return e.message;
+    case 'AI_DISABLED': return 'قابلیت هوش مصنوعی روی این سرور فعال نیست';
+    case 'AI_TEXT_TOO_LONG': return 'متن بیش از حد بلند است';
     case 'NETWORK': return e.message;
-    default: return 'خطا در ارتباط با سرور';
+    default: return e.message || 'خطا در ارتباط با سرور';
   }
 };
 
@@ -90,6 +98,156 @@ let lkAudioEls = []; // المان‌های صوتی attach‌شده
 
 // ————— گام ۷: اعلان بومی + badge —————
 let chatListCache = []; // آخرین لیست گفتگوها برای عنوان اعلان و تپ
+
+// ————— گام ۹: هوش مصنوعی —————
+let aiBusy = false;
+
+/** اجرای عملیات AI با مدیریت رضایت — در 403، پرسش فعال‌سازی و تلاش دوباره */
+async function runAi(fn) {
+  if (aiBusy) return null;
+  aiBusy = true;
+  try {
+    return await fn();
+  } catch (e) {
+    if (e?.code === 'AI_CONSENT_REQUIRED') {
+      if (confirm(
+        'برای قابلیت‌های هوشمند باید رضایت دهید.\nمحتوای گفتگو فقط با رضایت شما به سرویس هوش مصنوعی ارسال می‌شود؛ پیام‌های رمزنگاری‌شده هرگز استفاده نمی‌شوند.\n\nفعال شود؟',
+      )) {
+        await apiCall('/ai/consent', {
+          method: 'PATCH', token: session.accessToken, body: { enabled: true },
+        });
+        return await fn();
+      }
+      return null;
+    }
+    alert(faError(e));
+    return null;
+  } finally {
+    aiBusy = false;
+  }
+}
+
+function showAiModal(title, text) {
+  $('aiModalTitle').textContent = title;
+  $('aiModalText').textContent = text;
+  $('aiModal').classList.remove('hidden');
+}
+$('aiModalClose').onclick = () => $('aiModal').classList.add('hidden');
+
+/** منوی ✨ — سه عمل + بستن، در همان نوار چیپ */
+function showAiMenu() {
+  const box = $('aiChips');
+  box.innerHTML = '';
+  const mk = (label, fn) => {
+    const b = document.createElement('button');
+    b.className = 'ai-chip';
+    b.textContent = label;
+    b.onclick = () => { box.classList.add('hidden'); void fn(); };
+    return b;
+  };
+  box.appendChild(mk('✨ پیشنهاد پاسخ', aiSuggest));
+  box.appendChild(mk('🧾 خلاصهٔ گفتگو', aiSummarize));
+  box.appendChild(mk('🌐 ترجمهٔ آخرین پیام', aiTranslateLast));
+  const close = document.createElement('button');
+  close.className = 'ai-chip ai-chip-close';
+  close.textContent = '✕';
+  close.onclick = () => box.classList.add('hidden');
+  box.appendChild(close);
+  box.classList.remove('hidden');
+}
+$('aiMenuBtn').onclick = showAiMenu;
+
+async function aiSuggest() {
+  if (!currentConv) return;
+  await runAi(async () => {
+    const r = await apiCall('/ai/suggest', {
+      method: 'POST', token: session.accessToken,
+      body: { conversationId: currentConv.id, count: 3 },
+    });
+    const lines = String(r.text ?? '').split('\n').filter((l) => l.trim());
+    if (!lines.length) return;
+    const box = $('aiChips');
+    box.innerHTML = '';
+    for (const line of lines) {
+      const b = document.createElement('button');
+      b.className = 'ai-chip';
+      b.title = line;
+      b.textContent = line;
+      b.onclick = () => {
+        $('msgInput').value = line.replace(/^پیشنهاد \d+[^:]*: /, '').trim();
+        box.classList.add('hidden');
+        $('msgInput').focus();
+      };
+      box.appendChild(b);
+    }
+    const close = document.createElement('button');
+    close.className = 'ai-chip ai-chip-close';
+    close.textContent = '✕';
+    close.onclick = () => box.classList.add('hidden');
+    box.appendChild(close);
+    box.classList.remove('hidden');
+  });
+}
+
+async function aiSummarize() {
+  if (!currentConv) return;
+  await runAi(async () => {
+    const r = await apiCall('/ai/summarize', {
+      method: 'POST', token: session.accessToken,
+      body: { conversationId: currentConv.id, limit: 20 },
+    });
+    showAiModal('خلاصهٔ گفتگو', r.text);
+  });
+}
+
+/** ترجمهٔ یک پیام — با دوبار کلیک روی پیام یا «ترجمهٔ آخرین پیام» منو */
+function aiTranslateMessage(m) {
+  if (!m || m.isE2ee) {
+    if (m?.isE2ee) alert('پیام‌های رمزنگاری‌شدهٔ سرتاسری قابل ترجمه نیستند');
+    return;
+  }
+  void runAi(async () => {
+    const r = await apiCall('/ai/translate', {
+      method: 'POST', token: session.accessToken, body: { messageId: m.id },
+    });
+    showAiModal('ترجمه', `${r.text}\n\n— متن اصلی: ${m.body}`);
+  });
+}
+
+function aiTranslateLast() {
+  const last = [...localMessages].reverse().find((m) => m.senderId !== session.user.id && m.body && !m.isE2ee);
+  if (!last) {
+    alert('پیام قابل‌ترجمه‌ای از طرف مقابل نیست');
+    return;
+  }
+  aiTranslateMessage(last);
+}
+
+/** پروفایل: وضعیت + رضایت AI */
+async function refreshAiProfile() {
+  try {
+    const s = await apiCall('/ai/status', { token: session.accessToken });
+    $('aiStatusVal').textContent = s.available
+      ? `${s.provider} — رضایت: ${s.globalConsent ? 'داده شده ✓' : 'داده نشده'}`
+      : 'غیرفعال (بدون provider)';
+    const btn = $('aiConsentToggle');
+    btn.classList.remove('hidden');
+    btn.textContent = s.globalConsent ? 'لغو رضایت هوش مصنوعی' : 'دادن رضایت هوش مصنوعی';
+    btn.onclick = async () => {
+      try {
+        await apiCall('/ai/consent', {
+          method: 'PATCH', token: session.accessToken, body: { enabled: !s.globalConsent },
+        });
+        void refreshAiProfile();
+      } catch (e) {
+        alert(faError(e));
+      }
+    };
+  } catch {
+    $('aiStatusVal').textContent = 'نامشخص';
+    $('aiConsentToggle').classList.add('hidden');
+  }
+}
 
 function updateBadge() {
   const total = chatListCache.reduce((s, c) => s + (c.unreadCount ?? 0), 0);
@@ -500,6 +658,7 @@ async function openChat(conv) {
   $('chatStatus').innerHTML = '&nbsp;';
   $('msgList').innerHTML = '';
   $('msgInput').value = '';
+  $('aiChips').classList.add('hidden'); // گام ۹ — پاک‌سازی چیپ‌های گفتگوی قبلی
   show('chat');
   $('msgInput').focus();
   // گام ۶: دکمه‌های تماس فقط در گفتگوهای ۱:۱
@@ -577,6 +736,12 @@ function renderMessages() {
       const body = document.createElement('span');
       body.className = 'msg-body';
       body.textContent = m.body;
+      // گام ۹: دوبار کلیک روی پیام طرف مقابل (غیررمز) → ترجمه
+      if (!mine && !m.isE2ee) {
+        body.title = 'دوبار کلیک: ترجمه ✨';
+        body.classList.add('msg-body-ai');
+        body.ondblclick = () => aiTranslateMessage(m);
+      }
       div.appendChild(body);
     }
     if (mine) {
@@ -1023,6 +1188,7 @@ $('goProfile').onclick = () => {
   const active = e2eeReadyLocal();
   $('e2eeStatus').textContent = active ? '🔒 فعال (X3DH + Double Ratchet)' : 'غیرفعال';
   $('showRecovery').classList.toggle('hidden', !e2eeStoreLocal.recovery());
+  void refreshAiProfile(); // گام ۹
   show('profile');
   void checkHealth();
 };

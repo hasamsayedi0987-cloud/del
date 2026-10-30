@@ -45,6 +45,19 @@ export interface AppConfig {
   pushWebhookUrl: string | undefined;
   /** ارسال به سرویس Expo Push برای توکن‌های ExpoPushToken (پیش‌فرض روشن) */
   pushExpoEnabled: boolean;
+  // ————— هوش مصنوعی (گام ۹) —————
+  /** mock | openai | webhook — پیش‌فرض: خودکار (openai اگر کلید باشد، webhook اگر URL باشد، وگرنه mock) */
+  aiProvider: 'mock' | 'openai' | 'webhook' | undefined;
+  /** آدرس پایه سازگار با OpenAI (مثلاً https://api.openai.com/v1 یا vLLM محلی) */
+  aiBaseUrl: string | undefined;
+  aiApiKey: string | undefined;
+  aiModel: string;
+  /** URL سرویس webhook عمومی (تست/یکپارچه‌سازی خودمیزبان) */
+  aiWebhookUrl: string | undefined;
+  /** سقف فراخوانی AI به ازای هر کاربر در دقیقه */
+  aiRatePerMin: number;
+  /** آیا قابلیت AI فعال است؟ (AI_ENABLED=false خاموشش می‌کند) */
+  aiEnabled: boolean;
 }
 
 export const appConfig = {
@@ -86,6 +99,16 @@ export const appConfig = {
       callsConfigured: Boolean(env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET),
       pushWebhookUrl: env.PUSH_WEBHOOK_URL,
       pushExpoEnabled: (env.PUSH_EXPO_ENABLED ?? 'true') === 'true',
+      aiProvider:
+        env.AI_PROVIDER === 'mock' || env.AI_PROVIDER === 'openai' || env.AI_PROVIDER === 'webhook'
+          ? env.AI_PROVIDER
+          : undefined,
+      aiBaseUrl: env.AI_BASE_URL,
+      aiApiKey: env.AI_API_KEY,
+      aiModel: env.AI_MODEL ?? 'gpt-4o-mini',
+      aiWebhookUrl: env.AI_WEBHOOK_URL,
+      aiRatePerMin: Number(env.AI_RATE_PER_MIN ?? 20),
+      aiEnabled: (env.AI_ENABLED ?? 'true') === 'true',
     };
   },
 };

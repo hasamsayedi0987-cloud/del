@@ -65,10 +65,14 @@
       <span class="topbar-actions">
         <button id="callAudio" class="link accent call-btn hidden" title="تماس صوتی">📞</button>
         <button id="callVideo" class="link accent call-btn hidden" title="تماس تصویری">🎥</button>
+        <!-- گام ۹: منوی هوش مصنوعی -->
+        <button id="aiMenuBtn" class="link accent call-btn" title="هوش مصنوعی">✨</button>
       </span>
     </div>
     <button id="loadOlder" class="ghost small-btn hidden">پیام‌های قدیمی‌تر…</button>
     <div id="msgList" class="msg-list"></div>
+    <!-- گام ۹: چیپ‌های پیشنهاد پاسخ -->
+    <div id="aiChips" class="ai-chips hidden"></div>
     <div class="composer">
       <button id="attachBtn" class="ghost attach" title="ارسال فایل" accessibilityLabel="ارسال فایل">📎</button>
       <input id="fileInput" type="file" class="hidden" />
@@ -91,7 +95,9 @@
       <div class="row"><span class="lbl">نام نمایشی</span><span id="meName" class="val"></span></div>
       <div class="row"><span class="lbl">شناسه</span><span id="meId" class="val"></span></div>
       <div class="row"><span class="lbl">رمزنگاری سرتاسری</span><span id="e2eeStatus" class="val"></span></div>
+      <div class="row"><span class="lbl">هوش مصنوعی</span><span id="aiStatusVal" class="val">…</span></div>
     </div>
+    <button id="aiConsentToggle" class="ghost">…</button>
     <button id="showRecovery" class="ghost hidden">نمایش کلید بازیابی</button>
 
     <label class="section" for="displayName">نام نمایشی</label>
@@ -181,6 +187,15 @@
       <button id="callMute" class="call-circle hidden" title="میکروفون">🎙</button>
       <button id="callCam" class="call-circle hidden" title="دوربین">📷</button>
       <button id="callHangup" class="call-circle reject hidden" title="پایان تماس">✕</button>
+    </div>
+  </div>
+
+  <!-- هوش مصنوعی (گام ۹) -->
+  <div id="aiModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h1 id="aiModalTitle">هوش مصنوعی</h1>
+      <div id="aiModalText" class="ai-modal-text"></div>
+      <button id="aiModalClose" class="primary">بستن</button>
     </div>
   </div>
 

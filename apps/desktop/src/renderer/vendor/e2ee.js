@@ -3599,19 +3599,20 @@ var DelE2ee = (() => {
     get peer() {
       return { userId: this.peerUserId, deviceId: this.peerDeviceId };
     }
-    /** رمز کردن — خروجی آمادهٔ جای‌گیری در EnvelopeEntry */
+    /** رمز کردن — خروجی آمادهٔ جای‌گیری در EnvelopeEntry (بار پیش‌کلیدی در pm جدا است) */
     encrypt(plaintext, ad) {
       const wire = { rm: this.ratchet.encrypt(utf8ToBytes(plaintext), ad) };
-      if (this.pendingPm) {
-        wire.pm = this.pendingPm;
-        this.pendingPm = void 0;
-      }
-      return {
+      const entry = {
         deviceId: this.peerDeviceId,
         from: "",
         // فرستنده در سطح پاکت پر می‌شود
         ct: toB64(utf8ToBytes(JSON.stringify(wire)))
       };
+      if (this.pendingPm) {
+        entry.pm = this.pendingPm;
+        this.pendingPm = void 0;
+      }
+      return entry;
     }
     decrypt(entry, ad) {
       const wire = JSON.parse(bytesToUtf8(fromB64(entry.ct)));

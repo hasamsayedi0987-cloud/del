@@ -12,6 +12,8 @@ export interface UserDto {
   displayName: string | null;
   avatarUrl: string | null;
   about: string | null;
+  /** رضایت کلی هوش مصنوعی (گام ۹) */
+  aiConsent: boolean;
   createdAt: string;
 }
 
@@ -103,6 +105,8 @@ export interface ConversationDto {
   unreadCount: number;
   /** پیش‌نمایش آخرین پیام */
   lastMessage: { body: string; createdAt: string; senderId: string } | null;
+  /** رضایت هوش مصنوعی من در این گفتگو (گام ۹) — null = تبعیت از رضایت کلی */
+  myAiConsent?: boolean | null;
 }
 
 /** پیام broadcast سرور به کلاینت‌های عضو مکالمه (رویداد message.new) */
@@ -396,4 +400,51 @@ export interface E2eeBackup {
   blob: string;
   salt: string;
   updatedAt: string;
+}
+
+// ————— هوش مصنوعی (گام ۹) —————
+
+export type AiFeature = 'translate' | 'fix' | 'suggest' | 'summarize';
+
+export type AiProviderName = 'mock' | 'openai' | 'webhook';
+
+/** بدنه پاسخ درخواست‌های AI — بدون کلید provider (سرور آن را نگه می‌دارد) */
+export interface AiTextResult {
+  feature: AiFeature;
+  text: string;
+  provider: AiProviderName | string;
+  /** زبان مقصد برای translate */
+  target?: string;
+}
+
+/** رکورد مصرف — GET /ai/usage (فقط متادیتا برای کنترل هزینه) */
+export interface AiUsageDto {
+  id: string;
+  feature: AiFeature | string;
+  provider: string;
+  ok: boolean;
+  charsIn: number;
+  charsOut: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  latencyMs: number;
+  conversationId: string | null;
+  createdAt: string;
+}
+
+/** پاسخ GET /ai/usage */
+export interface AiUsageReport {
+  items: AiUsageDto[];
+  total: number;
+  /** جمع کاراکتر ورودی/خروجی برای برآورد هزینه */
+  charsIn: number;
+  charsOut: number;
+}
+
+/** پاسخ GET /ai/status — وضعیت قابلیت AI برای این کاربر */
+export interface AiStatus {
+  /** آیا سرور اصلاً provider AI دارد؟ */
+  available: boolean;
+  provider: AiProviderName | string | null;
+  globalConsent: boolean;
 }

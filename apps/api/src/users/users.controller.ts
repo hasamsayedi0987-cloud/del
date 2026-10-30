@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, IsBoolean } from 'class-validator';
 import type { UserDto } from '@del/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { JwtAuthGuard, AuthedRequest } from '../common/jwt-auth.guard';
@@ -25,6 +25,11 @@ class UpdateMeDto {
   @IsString()
   @MaxLength(140)
   about?: string;
+
+  /** رضایت کلی هوش مصنوعی (گام ۹) — اختیاری در PATCH /users/me */
+  @IsOptional()
+  @IsBoolean()
+  aiConsent?: boolean;
 }
 
 @ApiTags('users')
@@ -44,6 +49,7 @@ export class UsersController {
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
       about: user.about,
+      aiConsent: user.aiConsent,
       createdAt: user.createdAt.toISOString(),
     };
   }
@@ -52,7 +58,11 @@ export class UsersController {
   async updateMe(@Req() req: AuthedRequest, @Body() dto: UpdateMeDto): Promise<UserDto> {
     const user = await this.prisma.user.update({
       where: { id: req.user.sub },
-      data: { displayName: dto.displayName, about: dto.about },
+      data: {
+        displayName: dto.displayName,
+        about: dto.about,
+        ...(dto.aiConsent === undefined ? {} : { aiConsent: dto.aiConsent }),
+      },
     });
     return {
       id: user.id,
@@ -60,6 +70,7 @@ export class UsersController {
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
       about: user.about,
+      aiConsent: user.aiConsent,
       createdAt: user.createdAt.toISOString(),
     };
   }

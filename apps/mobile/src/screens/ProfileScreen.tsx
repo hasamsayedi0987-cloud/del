@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Text, TextInput, View, StyleSheet } from 'react-native';
+import { Text, TextInput, View, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { api } from '../api';
 import { theme } from '../theme';
 import { Button, Card, Screen, Subtitle, Title } from '../components/ui';
@@ -22,6 +22,21 @@ export function ProfileScreen({
 }) {
   const [name, setName] = useState(user.displayName ?? '');
   const [saving, setSaving] = useState(false);
+
+  // ————— گام ۹: رضایت هوش مصنوعی —————
+  const [aiConsent, setAiConsent] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await api.aiStatus(accessToken);
+        setAiConsent(s.globalConsent);
+        setAiAvailable(s.available);
+      } catch {
+        // بی‌اهمیت — نمایش پیش‌فرض
+      }
+    })();
+  }, [accessToken]);
 
   // ————— گام ۸: وضعیت رمزنگاری —————
   const [e2eeActive, setE2eeActive] = useState(false);
@@ -89,6 +104,32 @@ export function ProfileScreen({
         ) : null}
       </Card>
 
+      <Text style={styles.section}>هوش مصنوعی</Text>
+      <Card>
+        <Row
+          label="وضعیت سرویس"
+          value={aiAvailable ? 'فعال روی سرور' : 'غیرفعال (بدون provider)'}
+        />
+        <Row label="رضایت من" value={aiConsent ? 'داده شده ✓' : 'داده نشده'} />
+        <Text style={styles.aiNote}>
+          با رضایت، قابلیت‌های ترجمه، پیشنهاد پاسخ و خلاصه فعال می‌شوند. پیام‌های رمزنگاری‌شدهٔ سرتاسری هرگز برای هوش مصنوعی استفاده نمی‌شوند و رضایت می‌تواند برای هر گفتگو جداگانه لغو شود.
+        </Text>
+        <TouchableOpacity
+          style={[styles.aiToggle, aiConsent ? styles.aiToggleOn : null]}
+          onPress={() => {
+            const next = !aiConsent;
+            api
+              .setAiConsent(accessToken, next)
+              .then(() => setAiConsent(next))
+              .catch(() => Alert.alert('خطا', 'تغییر رضایت ناموفق بود'));
+          }}
+        >
+          <Text style={styles.aiToggleText}>
+            {aiConsent ? 'لغو رضایت هوش مصنوعی' : 'دادن رضایت هوش مصنوعی'}
+          </Text>
+        </TouchableOpacity>
+      </Card>
+
       <View style={styles.bottom}>
         <Button label="خروج از حساب" variant="danger" onPress={onLogout} />
       </View>
@@ -148,6 +189,25 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingVertical: 4,
   },
+  aiNote: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 20,
+    textAlign: 'right',
+    marginTop: 6,
+  },
+  aiToggle: {
+    marginTop: 10,
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: theme.radius,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  aiToggleOn: {
+    borderColor: '#ef4444',
+  },
+  aiToggleText: { color: theme.accent, fontSize: 14, fontWeight: '700' },
   bottom: {
     marginTop: 'auto',
     paddingTop: 24,

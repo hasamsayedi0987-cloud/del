@@ -1,6 +1,6 @@
 {
   "name": "@del/e2ee",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Del E2EE — X3DH + Double Ratchet (Signal-style) برای چت خصوصی؛ بدون وابستگی زمان اجرا (باندل‌شده)",
   "main": "dist/index.js",

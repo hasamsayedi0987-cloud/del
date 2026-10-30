@@ -32,6 +32,7 @@ function toUserDto(u: {
   displayName: string | null;
   avatarUrl: string | null;
   about: string | null;
+  aiConsent: boolean;
   createdAt: Date;
 }): UserDto {
   return {
@@ -40,6 +41,7 @@ function toUserDto(u: {
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
     about: u.about,
+    aiConsent: u.aiConsent,
     createdAt: u.createdAt.toISOString(),
   };
 }

@@ -1,5 +1,8 @@
 import { API_BASE_URL } from './config';
 import type {
+  AiStatus,
+  AiTextResult,
+  AiUsageReport,
   AuthSession,
   CallDto,
   CallJoinInfo,
@@ -343,6 +346,58 @@ export const api = {
     const qs = params.length ? `?${params.join('&')}` : '';
     return request<CallPage>(`/calls${qs}`, { token });
   },
+
+  // ————— هوش مصنوعی (گام ۹) —————
+
+  aiStatus: (token: string) => request<AiStatus>('/ai/status', { token }),
+
+  setAiConsent: (token: string, enabled: boolean) =>
+    request<{ ok: true; aiConsent: boolean }>('/ai/consent', {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ enabled }),
+    }),
+
+  setConversationAiConsent: (token: string, conversationId: string, enabled: boolean | null) =>
+    request<{ ok: true; conversationId: string; aiConsent: boolean | null }>(
+      `/conversations/${conversationId}/ai-consent`,
+      {
+        method: 'PATCH',
+        token,
+        body: JSON.stringify({ enabled }),
+      },
+    ),
+
+  aiTranslate: (token: string, messageId: string, target?: string) =>
+    request<AiTextResult>('/ai/translate', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ messageId, ...(target ? { target } : {}) }),
+    }),
+
+  aiFix: (token: string, text: string) =>
+    request<AiTextResult>('/ai/fix', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ text }),
+    }),
+
+  aiSuggest: (token: string, conversationId: string, count = 3) =>
+    request<AiTextResult>('/ai/suggest', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ conversationId, count }),
+    }),
+
+  aiSummarize: (token: string, conversationId: string, opts?: { limit?: number; unreadOnly?: boolean }) =>
+    request<AiTextResult>('/ai/summarize', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ conversationId, ...opts }),
+    }),
+
+  aiUsage: (token: string, limit = 50) =>
+    request<AiUsageReport>(`/ai/usage?limit=${limit}`, { token }),
 };
 
 function PlatformOS(): string {

@@ -198,6 +198,7 @@ export class MessagesService {
         : null,
       memberCount: isGroup ? conv.participants.length : undefined,
       myRole: isGroup ? (me.role as 'admin' | 'member') : null,
+      myAiConsent: me.aiConsent,
       participants: isGroup
         ? conv.participants.map((p) => toParticipantDto(p))
         : undefined,
@@ -251,6 +252,7 @@ export class MessagesService {
             : null,
           memberCount: isGroup ? conv.participants.length : undefined,
           myRole: isGroup ? (part.role as 'admin' | 'member') : null,
+          myAiConsent: part.aiConsent,
           unreadCount,
           lastMessage: conv.messages[0]
             ? {

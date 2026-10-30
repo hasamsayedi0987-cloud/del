@@ -12,6 +12,7 @@ import { MediaModule } from './media/media.module';
 import { CallsModule } from './calls/calls.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { E2eeModule } from './e2ee/e2ee.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { E2eeModule } from './e2ee/e2ee.module';
     CallsModule,
     NotificationsModule,
     E2eeModule,
+    AiModule,
   ],
 })
 export class AppModule {}

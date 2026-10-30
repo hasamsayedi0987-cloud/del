@@ -5,7 +5,9 @@ import {
   Image,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
+  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -114,6 +116,11 @@ export function ChatScreen({
 
   // ————— گام ۸: رمزنگاری سرتاسری چت خصوصی —————
   const [e2eeOn, setE2eeOn] = useState(false);
+
+  // ————— گام ۹: هوش مصنوعی (ترجمه/پیشنهاد/خلاصه با رضایت opt-in) —————
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiChips, setAiChips] = useState<string[]>([]);
+  const [aiResult, setAiResult] = useState<{ title: string; text: string } | null>(null);
 
   /** پیام E2EE → متن؛ اگر این دستگاه گیرنده نبود/کلید نبود → placeholder */
   const tryDecrypt = useCallback(
@@ -502,6 +509,86 @@ export function ChatScreen({
     [convId],
   );
 
+  // ————— گام ۹: هندلرهای هوش مصنوعی —————
+
+  /** در 403 رضایت: پرسش فعال‌سازی و تلاش دوباره */
+  const ensureAiConsent = useCallback(
+    async (retry: () => Promise<void>) => {
+      Alert.alert(
+        'هوش مصنوعی',
+        'برای قابلیت‌های هوشمند باید رضایت دهید. محتوای گفتگو فقط با رضایت شما به سرویس هوش مصنوعی ارسال می‌شود؛ پیام‌های رمزنگاری‌شده هرگز استفاده نمی‌شوند. فعال شود؟',
+        [
+          { text: 'نه', style: 'cancel' },
+          {
+            text: 'فعال می‌کنم',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await api.setAiConsent(accessToken, true);
+                  await retry();
+                } catch {
+                  Alert.alert('خطا', 'فعال‌سازی رضایت ناموفق بود.');
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [accessToken],
+  );
+
+  const runAi = useCallback(
+    async (fn: () => Promise<void>) => {
+      setAiBusy(true);
+      try {
+        await fn();
+      } catch (e) {
+        const err = e as { code?: string; message?: string };
+        if (err?.code === 'AI_CONSENT_REQUIRED') {
+          await ensureAiConsent(fn);
+        } else {
+          Alert.alert('هوش مصنوعی', err?.message ?? 'خطای ناشناخته');
+        }
+      } finally {
+        setAiBusy(false);
+      }
+    },
+    [ensureAiConsent],
+  );
+
+  /** ترجمه — با نگه‌داشتن روی پیام طرف مقابل (غیررمز) */
+  const translateMessage = useCallback(
+    (m: LocalMsg) => {
+      if (m.isE2ee) {
+        Alert.alert(
+          'ترجمه ممکن نیست',
+          'پیام‌های رمزنگاری‌شدهٔ سرتاسری قابل ترجمه نیستند — سرور محتوایشان را نمی‌فهمد.',
+        );
+        return;
+      }
+      void runAi(async () => {
+        const r = await api.aiTranslate(accessToken, m.id);
+        setAiResult({ title: 'ترجمه', text: r.text });
+      });
+    },
+    [accessToken, runAi],
+  );
+
+  const runSuggest = useCallback(() => {
+    void runAi(async () => {
+      const r = await api.aiSuggest(accessToken, convId, 3);
+      setAiChips(r.text.split('\n').filter((l) => l.trim()));
+    });
+  }, [accessToken, convId, runAi]);
+
+  const runSummary = useCallback(() => {
+    void runAi(async () => {
+      const r = await api.aiSummarize(accessToken, convId, { limit: 20 });
+      setAiResult({ title: 'خلاصهٔ گفتگو', text: r.text });
+    });
+  }, [accessToken, convId, runAi]);
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
@@ -580,14 +667,22 @@ export function ChatScreen({
           const mine = item.senderId === myUserId;
           const read = mine && item.serverSeq <= maxOtherLastRead;
           const from = mine ? '' : senderName(item.senderId);
+          // گام ۹: نگه‌داشتن روی پیام طرف مقابل (متنی، غیررمز) → ترجمه
+          const aiAble = !mine && Boolean(item.body) && !item.isE2ee;
+          const BubbleView: React.ElementType = aiAble ? TouchableOpacity : View;
           return (
             <View style={[styles.bubbleRow, mine ? { justifyContent: 'flex-start' } : { justifyContent: 'flex-end' }]}>
-              <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePeer]}>
+              <BubbleView
+                style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePeer]}
+                activeOpacity={0.85}
+                onLongPress={aiAble ? () => translateMessage(item) : undefined}
+              >
                 {from ? <Text style={styles.senderName}>{from}</Text> : null}
                 {item.media ? (
                   <MediaBubble token={accessToken} media={item.media} mine={mine} />
                 ) : null}
                 {item.body ? <Text style={styles.bubbleText}>{item.body}</Text> : null}
+                {aiAble ? <Text style={styles.aiHint}>نگه‌دارید: ترجمه ✨</Text> : null}
                 {mine && item.status === 'sending' ? (
                   <Text style={styles.status}>{item.pendingLabel ?? '… در حال ارسال'}</Text>
                 ) : null}
@@ -595,11 +690,65 @@ export function ChatScreen({
                 {mine && item.status === 'sent' ? (
                   <Text style={styles.ticks}>{read ? '✓✓' : '✓'}</Text>
                 ) : null}
-              </View>
+              </BubbleView>
             </View>
           );
         }}
       />
+
+      {/* گام ۹: هوش مصنوعی — چیپ‌های پیشنهاد یا نوار دکمه‌ها */}
+      {aiChips.length > 0 ? (
+        <View style={styles.aiChipsWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.aiChipsInner}>
+            {aiChips.map((c, i) => (
+              <TouchableOpacity
+                key={String(i)}
+                style={styles.aiChip}
+                onPress={() => {
+                  setDraft(c.replace(/^پیشنهاد \d+[^:]*: /, '').trim());
+                  setAiChips([]);
+                }}
+              >
+                <Text style={styles.aiChipText} numberOfLines={1}>
+                  {c}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.aiChipClose} onPress={() => setAiChips([])}>
+              <Text style={styles.aiChipText}>✕</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      ) : (
+        <View style={styles.aiBar}>
+          <TouchableOpacity style={styles.aiBtn} onPress={runSuggest} disabled={aiBusy}>
+            <Text style={styles.aiBtnText}>{aiBusy ? '… در حال اجرا' : '✨ پیشنهاد پاسخ'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.aiBtn} onPress={runSummary} disabled={aiBusy}>
+            <Text style={styles.aiBtnText}>🧾 خلاصهٔ گفتگو</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* گام ۹: نتیجهٔ ترجمه/خلاصه */}
+      <Modal
+        visible={aiResult !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAiResult(null)}
+      >
+        <View style={styles.aiModalBackdrop}>
+          <View style={styles.aiModalCard}>
+            <Text style={styles.aiModalTitle}>{aiResult?.title}</Text>
+            <ScrollView style={styles.aiModalBody}>
+              <Text style={styles.aiModalText}>{aiResult?.text}</Text>
+            </ScrollView>
+            <TouchableOpacity style={styles.aiModalClose} onPress={() => setAiResult(null)}>
+              <Text style={styles.aiModalCloseText}>بستن</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.composer}>
         <TouchableOpacity
@@ -678,6 +827,68 @@ const styles = StyleSheet.create({
   status: { color: 'rgba(4,18,31,0.55)', fontSize: 11, marginTop: 2, textAlign: 'left' },
   statusFailed: { color: '#7f1d1d', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
   ticks: { color: 'rgba(4,18,31,0.6)', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
+  // ————— گام ۹: هوش مصنوعی —————
+  aiHint: { color: theme.textDim, fontSize: 10, marginTop: 3, textAlign: 'left' },
+  aiBar: {
+    flexDirection: 'row-reverse',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  aiBtn: {
+    flex: 1,
+    backgroundColor: theme.surface,
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  aiBtnText: { color: theme.accent, fontSize: 13, fontWeight: '700' },
+  aiChipsWrap: { paddingVertical: 6, paddingHorizontal: 10 },
+  aiChipsInner: { flexDirection: 'row-reverse', gap: 8, alignItems: 'center' },
+  aiChip: {
+    backgroundColor: theme.surface,
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    maxWidth: 220,
+  },
+  aiChipClose: {
+    backgroundColor: 'transparent',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  aiChipText: { color: theme.accent, fontSize: 13 },
+  aiModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(2,10,18,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  aiModalCard: {
+    width: '100%',
+    maxHeight: '78%',
+    backgroundColor: theme.surface,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+  },
+  aiModalTitle: { color: theme.accent, fontSize: 16, fontWeight: '800', marginBottom: 10, textAlign: 'right' },
+  aiModalBody: { flexGrow: 0 },
+  aiModalText: { color: theme.text, fontSize: 15, lineHeight: 24, textAlign: 'right' },
+  aiModalClose: {
+    marginTop: 14,
+    backgroundColor: theme.accentStrong,
+    borderRadius: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  aiModalCloseText: { color: '#04121F', fontWeight: '800' },
   composer: {
     flexDirection: 'row-reverse',
     alignItems: 'flex-end',

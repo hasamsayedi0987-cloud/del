@@ -18,6 +18,8 @@ model User {
   avatarUrl   String?
   about       String?
   lastSeenAt  DateTime?
+  /** رضایت کلی برای هوش مصنوعی (گام ۹) — بدون آن هیچ محتوایی به سرویس AI نمی‌رود */
+  aiConsent   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -30,6 +32,7 @@ model User {
   callsReceived  Call[]         @relation("callsReceived")
   e2eeIdentities E2eeIdentity[]
   e2eeBackup     E2eeKeyBackup?
+  aiUsage        AiUsage[]
 }
 
 model Device {
@@ -93,6 +96,7 @@ model Conversation {
   messages     Message[]
   mediaAssets  MediaAsset[]
   calls        Call[]
+  aiUsage      AiUsage[]
 
   @@index([lastMessageAt])
   @@index([updatedAt])
@@ -104,6 +108,8 @@ model Participant {
   userId         String   @db.Uuid
   role           String   @default("member") // member | admin (گروه‌ها — گام ۴)
   lastReadSeq    Int      @default(0)
+  /** رضایت هوش مصنوعی در همین گفتگو (گام ۹) — null = تبعیت از رضایت کلی کاربر */
+  aiConsent      Boolean?
   joinedAt       DateTime @default(now())
   /** همگام‌سازی افزایشی (گام ۷) — خواندن/تغییر نقش/پیوستن این سطر را تازه می‌کند */
   updatedAt      DateTime @default(now()) @updatedAt
@@ -243,4 +249,30 @@ model E2eeKeyBackup {
   updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ————— هوش مصنوعی (گام ۹) —————
+// ثبت مصرف برای کنترل هزینه — فقط متادیتا، هرگز محتوای پیام
+
+model AiUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  conversationId String?  @db.Uuid
+  feature        String // translate | fix | suggest | summarize
+  provider       String // mock | openai | webhook
+  /** آیا فراخوانی provider موفق بود؟ */
+  ok             Boolean
+  /** طول متن ورودی/خروجی به کاراکتر (محتوای واقعی ذخیره نمی‌شود) */
+  charsIn        Int      @default(0)
+  charsOut       Int      @default(0)
+  promptTokens   Int?
+  completionTokens Int?
+  latencyMs      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([conversationId])
 }
