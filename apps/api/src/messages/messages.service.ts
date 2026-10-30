@@ -7,6 +7,7 @@ import type {
   ParticipantDto,
 } from '@del/shared-types';
 import { PrismaService } from '../infra/prisma.service';
+import { BlocksService } from '../users/blocks.service';
 
 function httpError(status: number, code: string, message: string): HttpException {
   return new HttpException({ statusCode: status, error: { code, message } }, status);
@@ -122,6 +123,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
+    private readonly blocks: BlocksService,
   ) {}
 
   /** گفتگوی مستقیم دو‌نفره — idempotent: اگر وجود داشته باشد همان برگردانده می‌شود */
@@ -131,6 +133,9 @@ export class MessagesService {
     }
     const other = await this.prisma.user.findUnique({ where: { id: otherUserId } });
     if (!other) throw httpError(404, 'USER_NOT_FOUND', 'Target user does not exist');
+
+    // مسدودسازی (گام ۱۰) — باز کردن گفتگوی مستقیم تازه با زوج مسدود ممنوع
+    await this.blocks.assertNotBlocked(meId, otherUserId);
 
     // یافتن مکالمه direct موجودِ دقیقاً دو‌نفره شامل هر دو کاربر
     const candidates = await this.prisma.conversation.findMany({
@@ -347,6 +352,19 @@ export class MessagesService {
     isE2ee = false,
   ): Promise<SendResult> {
     await this.requireParticipant(meId, conversationId);
+
+    // مسدودسازی (گام ۱۰) — فقط گفتگوی مستقیم؛ گروه‌ها مشمول مسدودسازی دوجانبه نیستند
+    const convMeta = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { type: true },
+    });
+    if (convMeta?.type === 'direct') {
+      const peer = await this.prisma.participant.findFirst({
+        where: { conversationId, userId: { not: meId } },
+        select: { userId: true },
+      });
+      if (peer) await this.blocks.assertNotBlocked(meId, peer.userId);
+    }
 
     // ۰) اعتبارسنجی رسانه — مالکیت، مکالمه، وضعیت
     let media: { id: string; kind: string; originalName: string | null } | null = null;

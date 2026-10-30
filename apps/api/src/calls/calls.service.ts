@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { AppConfig } from '../config/configuration';
 import { appConfig } from '../config/configuration';
 import { PrismaService } from '../infra/prisma.service';
+import { BlocksService } from '../users/blocks.service';
 import type { CallDto, CallKind, CallPage } from '@del/shared-types';
 
 function httpError(status: number, code: string, message: string): HttpException {
@@ -77,6 +78,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly blocks: BlocksService,
     private readonly jwt: JwtService,
     private readonly events: EventEmitter2,
   ) {
@@ -109,6 +111,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     if (!mine) throw httpError(403, 'NOT_A_PARTICIPANT', 'شما عضو این گفتگو نیستید');
     const peer = conv.participants.find((p) => p.userId !== userId);
     if (!peer) throw httpError(409, 'CONVERSATION_EMPTY', 'طرف مقابل در این گفتگو نیست');
+
+    // مسدودسازی (گام ۱۰) — تماس بین زوج مسدود بسته است
+    await this.blocks.assertNotBlocked(userId, peer.userId);
 
     // قانون مشغولی — هر طرف در تماس باز (ringing/active) باشد تماس تازه رد می‌شود
     const busy = await this.hasOpenCall([userId, peer.userId]);

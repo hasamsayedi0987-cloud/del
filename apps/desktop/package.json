@@ -1,6 +1,6 @@
 {
   "name": "@del/desktop",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Del Desktop — Windows / macOS / Linux",
   "main": "src/main.js",

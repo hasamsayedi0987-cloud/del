@@ -2,16 +2,41 @@ import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+import { appConfig } from './config/configuration';
+
+/**
+ * سرآیندهای امنیتی پایه (گام ۱۰ — سخت‌سازی، ASVS V14)
+ * helmet وابسته نیست — مستقیم و شفاف.
+ */
+function securityHeaders(req: Request, res: Response, next: NextFunction): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Del-API', appConfig.load().version);
+  // CORS خودش Access-Control-Allow-Origin را می‌گذارد
+  next();
+}
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
 
   app.setGlobalPrefix('api/v1');
-  app.enableCors({ origin: true, credentials: true });
+  app.use(securityHeaders);
+  app.enableCors({
+    // پروداکشن: مبداها با DEL_CORS_ORIGINS (کاما بین آدرس‌ها) محدود می‌شوند — پیش‌فرض بسته
+    origin: process.env.DEL_CORS_ORIGINS
+      ? process.env.DEL_CORS_ORIGINS.split(',').map((s) => s.trim())
+      : true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  });
+  app.disable('x-powered-by');
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -24,8 +49,8 @@ async function bootstrap(): Promise<void> {
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Del API')
-      .setDescription('Del messenger — Step 1: Auth foundation')
-      .setVersion('0.1.0')
+      .setDescription('Del messenger — secure cross-platform messenger (iOS/Android/Windows/macOS)')
+      .setVersion(appConfig.load().version)
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, config);

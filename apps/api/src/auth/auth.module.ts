@@ -16,6 +16,6 @@ import { JwtAuthGuard } from '../common/jwt-auth.guard';
       }),
     }),
   ],
-  exports: [JwtAuthGuard, JwtModule],
+  exports: [JwtAuthGuard, JwtModule, RateLimitService],
 })
 export class AuthModule {}

@@ -7,6 +7,7 @@ import type {
   CallDto,
   CallJoinInfo,
   CallPage,
+  BlockListDto,
   ConversationDto,
   DeviceDto,
   E2eeBackup,
@@ -19,6 +20,7 @@ import type {
   PresenceDto,
   PresignResponse,
   PushTokenResponse,
+  ReportDto,
   RequestOtpResponse,
   SyncBootstrap,
   SyncUpdates,
@@ -248,6 +250,28 @@ export const api = {
 
   getPresence: (token: string, userId: string) =>
     request<PresenceDto>(`/users/${userId}/presence`, { token }),
+
+  // ————— مسدودسازی و گزارش (گام ۱۰) —————
+
+  listBlocks: (token: string) =>
+    request<BlockListDto>('/users/me/blocks', { token }),
+
+  blockUser: (token: string, userId: string) =>
+    request<void>(`/users/${userId}/block`, { method: 'POST', token }),
+
+  unblockUser: (token: string, userId: string) =>
+    request<void>(`/users/${userId}/block`, { method: 'DELETE', token }),
+
+  reportUser: (
+    token: string,
+    userId: string,
+    body: { reason: 'spam' | 'abuse' | 'impersonation' | 'other'; note?: string },
+  ) =>
+    request<{ report: ReportDto; duplicate: boolean }>(`/users/${userId}/report`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify(body),
+    }),
 
   // ————— گروه‌ها (گام ۴) —————
 

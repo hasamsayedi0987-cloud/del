@@ -43,6 +43,7 @@
       <button id="goProfile" class="link">پروفایل</button>
       <h2>گفتگوها</h2>
       <span class="topbar-actions">
+        <button id="goAdmin" class="link hidden">مدیریت</button>
         <button id="newGroup" class="link accent">+ گروه</button>
         <button id="newChat" class="link accent">+ جدید</button>
       </span>
@@ -67,6 +68,8 @@
         <button id="callVideo" class="link accent call-btn hidden" title="تماس تصویری">🎥</button>
         <!-- گام ۹: منوی هوش مصنوعی -->
         <button id="aiMenuBtn" class="link accent call-btn" title="هوش مصنوعی">✨</button>
+        <!-- گام ۱۰: گزینه‌های گفتگوی خصوصی (مسدودسازی/گزارش) -->
+        <button id="peerMenuBtn" class="link accent call-btn hidden" title="گزینه‌های گفتگو">⋯</button>
       </span>
     </div>
     <button id="loadOlder" class="ghost small-btn hidden">پیام‌های قدیمی‌تر…</button>
@@ -196,6 +199,51 @@
       <h1 id="aiModalTitle">هوش مصنوعی</h1>
       <div id="aiModalText" class="ai-modal-text"></div>
       <button id="aiModalClose" class="primary">بستن</button>
+    </div>
+  </div>
+
+  <!-- ————— گام ۱۰: پنل مدیریت ————— -->
+  <section id="screen-admin" class="screen">
+    <div class="topbar">
+      <button id="adminBack" class="link">‹ بازگشت</button>
+      <h2>پنل مدیریت</h2>
+      <span></span>
+    </div>
+    <div class="admin-tabs">
+      <button id="adminTabMetrics" class="admin-tab active">متریک‌ها</button>
+      <button id="adminTabUsers" class="admin-tab">کاربران</button>
+      <button id="adminTabReports" class="admin-tab">گزارش‌ها</button>
+      <button id="adminTabAudit" class="admin-tab">دفتر اقدامات</button>
+    </div>
+    <div id="adminContent" class="admin-content"></div>
+  </section>
+
+  <!-- منوی گفتگوی خصوصی (گام ۱۰) -->
+  <div id="peerMenuModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h1 id="peerMenuTitle">گزینه‌های گفتگو</h1>
+      <p id="peerMenuPeer" class="sub"></p>
+      <button id="peerBlockToggle" class="danger">مسدودسازی کاربر</button>
+      <button id="peerReportOpen" class="ghost">گزارش تخلف</button>
+      <button id="peerMenuClose" class="ghost">بستن</button>
+    </div>
+  </div>
+
+  <!-- گزارش تخلف (گام ۱۰) -->
+  <div id="reportModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h1>گزارش تخلف</h1>
+      <p class="sub">دلیل گزارش را مشخص کنید — برای ادمین‌ها قابل مشاهده است</p>
+      <select id="reportReason" dir="rtl">
+        <option value="spam">هرزنامه (spam)</option>
+        <option value="abuse">آزار و اذیت (abuse)</option>
+        <option value="impersonation">جعل هویت (impersonation)</option>
+        <option value="other">سایر</option>
+      </select>
+      <textarea id="reportNote" rows="3" placeholder="توضیح (اختیاری، حداکثر ۱۰۰۰ کاراکتر)"></textarea>
+      <div id="reportError" class="error"></div>
+      <button id="reportSend" class="primary">ارسال گزارش</button>
+      <button id="reportCancel" class="ghost">انصراف</button>
     </div>
   </div>
 

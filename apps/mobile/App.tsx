@@ -192,11 +192,30 @@ export default function App() {
       void refreshConvCache(accessToken);
     };
 
+    // گام ۱۰: مسدودسازی حساب توسط ادمین — خروج فوری با پیام شفاف
+    const onAccountBlocked = () => {
+      disconnectSocket();
+      void (async () => {
+        await Promise.all([
+          SecureStore.deleteItemAsync(KEYS.access),
+          SecureStore.deleteItemAsync(KEYS.refresh),
+          SecureStore.deleteItemAsync(KEYS.user),
+        ]).catch(() => undefined);
+        setAccessToken(null);
+        setRefreshToken(null);
+        setUser(null);
+        Alert.alert('حساب مسدود شد', 'حساب شما توسط پشتیبانی مسدود شده است.');
+        setRoute({ name: 'login-phone' });
+      })();
+    };
+
     s.on('message.new', onMessageNew);
     s.on('conversation.new', onConvNew);
+    s.on('account.blocked', onAccountBlocked);
     return () => {
       s.off('message.new', onMessageNew);
       s.off('conversation.new', onConvNew);
+      s.off('account.blocked', onAccountBlocked);
     };
   }, [accessToken, refreshConvCache, titleOf]);
 

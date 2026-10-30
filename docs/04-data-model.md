@@ -167,3 +167,13 @@ id, conversation_id, code یگانه, created_by, max_uses nullable, used_count,
 ## ۶. مهاجرت‌ها
 
 Prisma Migrate (یا Drizzle — در فاز ۰ نهایی می‌شود) با مهاجرت‌های فقط-جلو؛ هر مهاجرت با اسکریپت rollback مستند. ممنوع: تغییر مخرب ستون‌های پرحجم بدون double-write. حجم جدول messages با شاردینگ زمانی (partition by month) از فاز ۳+ در صورت نیاز ارزیابی می‌شود — نه زودتر.
+
+
+## افزوده‌های گام ۱۰ — مدیریت، گزارش و مسدودسازی
+
+| جدول | ستون‌های کلیدی | توضیح |
+|---|---|---|
+| User (توسعه) | `role` (user\|admin)، `blockedAt` | نقش سیستمی و انسداد حساب — بوت‌استرپ با ADMIN_PHONES |
+| UserBlock | blockerId, blockedId (یکتا) | مسدودسازی دوجانبهٔ DM — بلااستفاده از گروه |
+| UserReport | reporterId, reportedId, reason, status, resolution, handledBy/At | صف رسیدگی مدیران — یک رکورد باز به ازای هر جفت |
+| AuditLog | actorId, action, targetType/Id, meta (json) | دفتر اقدامات مدیریتی — مستند و فسادناپذیر در حد DB |

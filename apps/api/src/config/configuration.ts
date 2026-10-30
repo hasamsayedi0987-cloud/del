@@ -12,6 +12,8 @@ export interface AppConfig {
   /** سقف درخواست OTP به ازای هر شماره در پنجره زمانی */
   otpPerPhoneLimit: number;
   otpPhoneWindowSec: number;
+  /** سقف درخواست OTP به ازای هر IP در پنجره (پیش‌فرض ۲۰) */
+  otpPerIpLimit: number;
   otpTtlSec: number;
   otpMaxAttempts: number;
   version: string;
@@ -58,6 +60,11 @@ export interface AppConfig {
   aiRatePerMin: number;
   /** آیا قابلیت AI فعال است؟ (AI_ENABLED=false خاموشش می‌کند) */
   aiEnabled: boolean;
+  // ————— مدیریت (گام ۱۰) —————
+  /** شماره‌های ادمین جداشده با کاما — در ورود، نقش admin می‌گیرند (ADMIN_PHONES=+98912…,+98913…) */
+  adminPhones: string[];
+  /** آدرس ایمیل/نشانی DPO برای سیاست حریم خصوصی (سند ۰۹) */
+  privacyContact: string | undefined;
 }
 
 export const appConfig = {
@@ -75,6 +82,7 @@ export const appConfig = {
       authDevMode: (env.AUTH_DEV_MODE ?? 'true') === 'true',
       otpPerPhoneLimit: Number(env.OTP_PER_PHONE_LIMIT ?? 3),
       otpPhoneWindowSec: Number(env.OTP_PHONE_WINDOW_SEC ?? 600),
+      otpPerIpLimit: Number(env.OTP_PER_IP_LIMIT ?? 20),
       otpTtlSec: Number(env.OTP_TTL_SEC ?? 300),
       otpMaxAttempts: Number(env.OTP_MAX_ATTEMPTS ?? 5),
       version: env.npm_package_version ?? '0.1.0',
@@ -109,6 +117,11 @@ export const appConfig = {
       aiWebhookUrl: env.AI_WEBHOOK_URL,
       aiRatePerMin: Number(env.AI_RATE_PER_MIN ?? 20),
       aiEnabled: (env.AI_ENABLED ?? 'true') === 'true',
+      adminPhones: (env.ADMIN_PHONES ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      privacyContact: env.PRIVACY_CONTACT,
     };
   },
 };

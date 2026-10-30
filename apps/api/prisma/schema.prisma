@@ -20,6 +20,10 @@ model User {
   lastSeenAt  DateTime?
   /** رضایت کلی برای هوش مصنوعی (گام ۹) — بدون آن هیچ محتوایی به سرویس AI نمی‌رود */
   aiConsent   Boolean  @default(false)
+  /** نقش سیستمی (گام ۱۰) — admin به پنل مدیریت دسترسی دارد */
+  role        String   @default("user") // user | admin
+  /** مسدودشده توسط ادمین (گام ۱۰) — ورود/توکن/WS بلافاصله بسته می‌شود */
+  blockedAt   DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -33,6 +37,11 @@ model User {
   e2eeIdentities E2eeIdentity[]
   e2eeBackup     E2eeKeyBackup?
   aiUsage        AiUsage[]
+  reportsFiled   UserReport[]   @relation("reporter")
+  reportsAgainst UserReport[]   @relation("reported")
+  blocksIssued   UserBlock[]    @relation("blocker")
+  blocksReceived UserBlock[]    @relation("blocked")
+  auditEntries   AuditLog[]
 }
 
 model Device {
@@ -275,4 +284,62 @@ model AiUsage {
 
   @@index([userId, createdAt])
   @@index([conversationId])
+}
+
+// ————— مدیریت، گزارش و مسدودسازی (گام ۱۰) —————
+// گزارش سوءاستفاده توسط کاربران، مسدودسازی دوجانبهٔ DM و دفتر ثبت اقدامات مدیریتی
+
+/** مسدودسازی دوجانبه — blocker محتوای DM از/به blocked را نمی‌بیند */
+model UserBlock {
+  id        String   @id @default(uuid()) @db.Uuid
+  blockerId String   @db.Uuid
+  blockedId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  blocker User @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+/** گزارش سوءاستفاده — صف رسیدگی ادمین در پنل مدیریت */
+model UserReport {
+  id             String    @id @default(uuid()) @db.Uuid
+  reporterId     String    @db.Uuid
+  reportedId     String    @db.Uuid
+  conversationId String?   @db.Uuid
+  reason         String // spam | abuse | impersonation | other
+  note           String?
+  status         String    @default("open") // open | resolved | dismissed
+  /** یادداشت ادمین هنگام رسیدگی */
+  resolution     String?
+  handledBy      String?   @db.Uuid
+  handledAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  reporter User @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("reported", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([reportedId])
+  @@index([reporterId])
+}
+
+/** دفتر ثبت اقدامات مدیریتی — چه کسی، چه کاری، روی چه چیزی، چه وقت */
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  /** null = اقدام سیستمی */
+  actorId    String?  @db.Uuid
+  actorName  String?
+  action     String // user.block | user.unblock | report.resolve | report.dismiss | ...
+  targetType String? // user | report | system
+  targetId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([action])
 }

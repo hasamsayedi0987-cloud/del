@@ -14,6 +14,8 @@ export interface UserDto {
   about: string | null;
   /** رضایت کلی هوش مصنوعی (گام ۹) */
   aiConsent: boolean;
+  /** نقش سیستمی (گام ۱۰) — admin پنل مدیریت دارد */
+  role: 'user' | 'admin';
   createdAt: string;
 }
 
@@ -447,4 +449,93 @@ export interface AiStatus {
   available: boolean;
   provider: AiProviderName | string | null;
   globalConsent: boolean;
+}
+
+// ————— مدیریت، گزارش و مسدودسازی (گام ۱۰) —————
+
+export type UserRole = 'user' | 'admin';
+
+/** کاربر از دید ادمین — آمار و وضعیت انسداد */
+export interface AdminUserDto {
+  id: string;
+  phone: string;
+  displayName: string | null;
+  role: UserRole;
+  blockedAt: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+  stats: {
+    conversations: number;
+    messages: number;
+    devices: number;
+    reportsAgainst: number;
+  };
+  /** علتی که ادمین هنگام مسدودسازی ثبت کرده */
+  blockReason?: string | null;
+}
+
+export interface AdminUserPage {
+  items: AdminUserDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type ReportReason = 'spam' | 'abuse' | 'impersonation' | 'other';
+export type ReportStatus = 'open' | 'resolved' | 'dismissed';
+
+export interface ReportDto {
+  id: string;
+  reporter: { id: string; displayName: string | null; phone: string };
+  reported: { id: string; displayName: string | null; phone: string; blockedAt: string | null };
+  conversationId: string | null;
+  reason: ReportReason;
+  note: string | null;
+  status: ReportStatus;
+  resolution: string | null;
+  handledBy: string | null;
+  handledAt: string | null;
+  createdAt: string;
+}
+
+export interface ReportPage {
+  items: ReportDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** رکورد دفتر ثبت اقدامات مدیریتی — GET /admin/audit */
+export interface AuditLogDto {
+  id: string;
+  actorId: string | null;
+  actorName: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  meta: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+/** متریک‌های کلی پنل مدیریت — GET /admin/metrics */
+export interface AdminMetrics {
+  users: { total: number; admins: number; blocked: number };
+  conversations: { total: number; direct: number; group: number };
+  messages: { total: number; last24h: number };
+  media: { total: number; bytes: number };
+  calls: { total: number; last24h: number };
+  reports: { open: number; total: number };
+  /** تعداد کاربران آنلاین همین الان (از gateway) */
+  onlineNow: number;
+}
+
+/** فهرست مسدودسازی‌های من — GET /users/me/blocks */
+export interface BlockListDto {
+  items: { userId: string; displayName: string | null; phone: string; createdAt: string }[];
+}
+
+/** رویداد WS مسدودسازی حساب توسط ادمین — socket بلافاصله قطع می‌شود */
+export interface WsAccountBlocked {
+  code: 'ACCOUNT_BLOCKED';
+  message: string;
 }

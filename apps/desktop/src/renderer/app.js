@@ -61,6 +61,10 @@ const faError = (e) => {
     case 'AI_NOTHING_TO_READ': return e.message;
     case 'AI_DISABLED': return 'قابلیت هوش مصنوعی روی این سرور فعال نیست';
     case 'AI_TEXT_TOO_LONG': return 'متن بیش از حد بلند است';
+    // گام ۱۰ — مدیریت و مسدودسازی
+    case 'USER_BLOCKED': return 'گفتگوی مستقیم بین این دو حساب مسدود است';
+    case 'ACCOUNT_BLOCKED': return 'حساب شما مسدود شده است';
+    case 'ADMIN_ONLY': return 'این بخش فقط برای مدیران است';
     case 'NETWORK': return e.message;
     default: return e.message || 'خطا در ارتباط با سرور';
   }
@@ -101,6 +105,11 @@ let chatListCache = []; // آخرین لیست گفتگوها برای عنوا�
 
 // ————— گام ۹: هوش مصنوعی —————
 let aiBusy = false;
+
+// ————— گام ۱۰: مسدودسازی و پنل مدیریت —————
+let blockedByMe = new Set(); // userIdهایی که من مسدود کرده‌ام
+let adminTab = 'metrics';
+let peerMenuConv = null; // گفتگوی باز در منوی گزینه‌ها
 
 /** اجرای عملیات AI با مدیریت رضایت — در 403، پرسش فعال‌سازی و تلاش دوباره */
 async function runAi(fn) {
@@ -377,6 +386,7 @@ $('verify').onclick = async () => {
     store.set('refreshToken', session.refreshToken);
     connectWs(session.accessToken);
     void e2eeInit(session.accessToken, session.user.id); // گام ۸
+    $('goAdmin').classList.toggle('hidden', session.user?.role !== 'admin'); // گام ۱۰
     enterChats();
   } catch (e) {
     $('otpError').textContent = faError(e);
@@ -448,6 +458,11 @@ function connectWs(token) {
     }
     // پیش‌نمایش/شمارنده لیست هم به‌روز شود
     void renderChatList();
+  });
+  // گام ۱۰: مسدودسازی حساب توسط ادمین — بلافاصله خروج
+  socket.on('account.blocked', () => {
+    alert('حساب شما توسط پشتیبانی مسدود شده است.');
+    $('logout').click();
   });
   // گفتگوی تازه‌ساخته‌شده توسط کاربر دیگر → رفرش لیست (گام ۴: handler کامل در پایین)
   socket.on('conversation.new', () => {});
@@ -665,6 +680,9 @@ async function openChat(conv) {
   const direct = conv.type !== 'group';
   $('callAudio').classList.toggle('hidden', !direct);
   $('callVideo').classList.toggle('hidden', !direct);
+  // گام ۱۰: منوی گزینه‌ها فقط در گفتگوی خصوصی
+  $('peerMenuBtn').classList.toggle('hidden', !direct);
+  void refreshBlockedByMe();
   if (isGroupChat) void refreshGroupDetail();
   // گام ۸: اگر هر دو طرف هویت دارند ← این گفتگو رمز می‌شود
   if (direct && currentPeerId && e2eeReadyLocal()) {
@@ -1518,8 +1536,254 @@ $('e2eeRestoreGo').onclick = async () => {
     store.set('refreshToken', session.refreshToken);
     connectWs(session.accessToken);
     void e2eeInit(session.accessToken, session.user.id); // گام ۸
+    $('goAdmin').classList.toggle('hidden', session.user?.role !== 'admin'); // گام ۱۰
     enterChats();
   } catch {
     store.del('refreshToken');
   }
 })();
+
+// ————— گام ۱۰: مسدودسازی و گزارش کاربر + پنل مدیریت —————
+
+async function refreshBlockedByMe() {
+  try {
+    const r = await apiCall('/users/me/blocks', { token: session.accessToken });
+    blockedByMe = new Set((r.items ?? []).map((b) => b.userId));
+  } catch { /* غیرحیاتی */ }
+}
+
+function peerDisplayName() {
+  return currentConv?.peer?.displayName ?? currentConv?.peer?.phone ?? 'کاربر';
+}
+
+// — منوی گزینه‌های گفتگوی خصوصی —
+$('peerMenuBtn').onclick = async () => {
+  if (!currentConv || isGroupChat || !currentPeerId) return;
+  peerMenuConv = currentConv;
+  $('peerMenuTitle').textContent = 'گزینه‌های گفتگو';
+  $('peerMenuPeer').textContent = peerDisplayName();
+  await refreshBlockedByMe();
+  const blocked = blockedByMe.has(currentPeerId);
+  const btn = $('peerBlockToggle');
+  btn.textContent = blocked ? 'رفع مسدودسازی کاربر' : 'مسدودسازی کاربر';
+  btn.className = blocked ? 'ghost' : 'danger';
+  $('peerMenuModal').classList.remove('hidden');
+};
+$('peerMenuClose').onclick = () => $('peerMenuModal').classList.add('hidden');
+
+$('peerBlockToggle').onclick = async () => {
+  if (!currentPeerId) return;
+  const blocked = blockedByMe.has(currentPeerId);
+  try {
+    if (blocked) {
+      await apiCall(`/users/${currentPeerId}/block`, { method: 'DELETE', token: session.accessToken });
+      blockedByMe.delete(currentPeerId);
+      alert('مسدودسازی برداشته شد — گفتگوی مستقیم آزاد شد.');
+    } else {
+      await apiCall(`/users/${currentPeerId}/block`, { method: 'POST', token: session.accessToken });
+      blockedByMe.add(currentPeerId);
+      alert('کاربر مسدود شد — گفتگوی مستقیم دوطرفه بسته شد.');
+    }
+    $('peerMenuModal').classList.add('hidden');
+  } catch (e) {
+    alert(faError(e));
+  }
+};
+
+$('peerReportOpen').onclick = () => {
+  $('peerMenuModal').classList.add('hidden');
+  $('reportError').textContent = '';
+  $('reportNote').value = '';
+  $('reportModal').classList.remove('hidden');
+};
+$('reportCancel').onclick = () => $('reportModal').classList.add('hidden');
+$('reportSend').onclick = async () => {
+  const btn = $('reportSend');
+  btn.disabled = true;
+  try {
+    await apiCall(`/users/${currentPeerId}/report`, {
+      method: 'POST',
+      token: session.accessToken,
+      body: { reason: $('reportReason').value, note: $('reportNote').value.trim() || undefined },
+    });
+    $('reportModal').classList.add('hidden');
+    alert('گزارش شما ثبت شد و به صف رسیدگی مدیران رفت. سپاس از همکاری شما.');
+  } catch (e) {
+    $('reportError').textContent = faError(e);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ————— پنل مدیریت —————
+const faDate = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('fa-IR', { month: 'short', day: 'numeric' }) +
+      ' ' + new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+  } catch { return iso; }
+};
+const faNum = (n) => faDigits(String(n ?? 0));
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+$('goAdmin').onclick = () => { adminTab = 'metrics'; show('admin'); renderAdminTab(); };
+$('adminBack').onclick = () => show('chats');
+$('adminTabMetrics').onclick = () => { adminTab = 'metrics'; renderAdminTab(); };
+$('adminTabUsers').onclick = () => { adminTab = 'users'; renderAdminTab(); };
+$('adminTabReports').onclick = () => { adminTab = 'reports'; renderAdminTab(); };
+$('adminTabAudit').onclick = () => { adminTab = 'audit'; renderAdminTab(); };
+
+function renderAdminTab() {
+  ['metrics', 'users', 'reports', 'audit'].forEach((t) => {
+    $('adminTab' + t[0].toUpperCase() + t.slice(1)).classList.toggle('active', adminTab === t);
+  });
+  const box = $('adminContent');
+  box.innerHTML = '<p class="sub">در حال بارگذاری…</p>';
+  if (adminTab === 'metrics') void loadAdminMetrics(box);
+  if (adminTab === 'users') void loadAdminUsers(box, '');
+  if (adminTab === 'reports') void loadAdminReports(box, 'open');
+  if (adminTab === 'audit') void loadAdminAudit(box);
+}
+
+async function loadAdminMetrics(box) {
+  try {
+    const m = await apiCall('/admin/metrics', { token: session.accessToken });
+    const card = (label, value, accent) => `
+      <div class="admin-card ${accent ? 'accent' : ''}">
+        <div class="admin-card-value">${esc(value)}</div>
+        <div class="admin-card-label">${esc(label)}</div>
+      </div>`;
+    box.innerHTML = `
+      <div class="admin-grid">
+        ${card('کاربران', faNum(m.users.total))}
+        ${card('مدیران', faNum(m.users.admins))}
+        ${card('مسدودشده', faNum(m.users.blocked), m.users.blocked > 0)}
+        ${card('آنلاین همین حالا', faNum(m.onlineNow), true)}
+        ${card('گفتگوها', faNum(m.conversations.total))}
+        ${card('گروه‌ها', faNum(m.conversations.group))}
+        ${card('پیام‌ها', faNum(m.messages.total))}
+        ${card('پیام ۲۴ ساعت', faNum(m.messages.last24h))}
+        ${card('رسانه‌ها', faNum(m.media.total))}
+        ${card('تماس‌ها', faNum(m.calls.total))}
+        ${card('گزارش باز', faNum(m.reports.open), m.reports.open > 0)}
+        ${card('کل گزارش‌ها', faNum(m.reports.total))}
+      </div>`;
+  } catch (e) {
+    box.innerHTML = `<p class="error">${faError(e)}</p>`;
+  }
+}
+
+async function loadAdminUsers(box, q) {
+  try {
+    const page = await apiCall(`/admin/users?pageSize=50${q ? `&q=${encodeURIComponent(q)}` : ''}`, { token: session.accessToken });
+    box.innerHTML = `
+      <input id="adminUserSearch" type="text" placeholder="جست‌وجو با شماره یا نام…" dir="rtl" />
+      <div class="admin-table">
+        <div class="admin-tr admin-th"><span>کاربر</span><span>نقش</span><span>آمار</span><span>وضعیت</span><span></span></div>
+        ${page.items.map((u) => `
+          <div class="admin-tr" data-uid="${u.id}">
+            <span class="admin-user"><b>${esc(u.displayName ?? 'بدون نام')}</b><i dir="ltr">${esc(u.phone)}</i></span>
+            <span>${u.role === 'admin' ? '<b class="tag-admin">مدیر</b>' : 'کاربر'}</span>
+            <span class="admin-stats">${faNum(u.stats.conversations)} گفتگو · ${faNum(u.stats.messages)} پیام · ${faNum(u.stats.reportsAgainst)} گزارش</span>
+            <span>${u.blockedAt ? '<b class="tag-blocked">مسدود</b>' : `<span class="muted">${faDate(u.lastSeenAt)}</span>`}</span>
+            <span>${u.role === 'admin' ? '' : `<button class="${u.blockedAt ? 'ghost' : 'danger'} small-btn" data-act="${u.blockedAt ? 'unblock' : 'block'}">${u.blockedAt ? 'رفع مسدودی' : 'مسدودسازی'}</button>`}</span>
+          </div>`).join('')}
+      </div>
+      <p class="sub">مجموع: ${faNum(page.total)} کاربر</p>`;
+    $('adminUserSearch').value = q;
+    $('adminUserSearch').onkeydown = (ev) => { if (ev.key === 'Enter') void loadAdminUsers(box, $('adminUserSearch').value.trim()); };
+    box.querySelectorAll('button[data-act]').forEach((b) => {
+      b.onclick = async () => {
+        const uid = b.closest('[data-uid]').dataset.uid;
+        const act = b.dataset.act;
+        if (act === 'block' && !confirm('این کاربر مسدود شود؟ همه نشست‌هایش بلافاصله بسته می‌شود.')) return;
+        b.disabled = true;
+        try {
+          await apiCall(`/admin/users/${uid}/${act}`, {
+            method: 'POST', token: session.accessToken,
+            body: act === 'block' ? { reason: 'از پنل مدیریت' } : {},
+          });
+          void loadAdminUsers(box, $('adminUserSearch').value.trim());
+        } catch (e) {
+          alert(faError(e));
+          b.disabled = false;
+        }
+      };
+    });
+  } catch (e) {
+    box.innerHTML = `<p class="error">${faError(e)}</p>`;
+  }
+}
+
+async function loadAdminReports(box, status) {
+  try {
+    const page = await apiCall(`/admin/reports?pageSize=50${status ? `&status=${status}` : ''}`, { token: session.accessToken });
+    const reasonFa = { spam: 'هرزنامه', abuse: 'آزار', impersonation: 'جعل هویت', other: 'سایر' };
+    box.innerHTML = `
+      <div class="admin-filter">
+        <button class="ghost small-btn ${status === 'open' ? '' : 'active'}" data-f="open">باز</button>
+        <button class="ghost small-btn" data-f="">همه</button>
+      </div>
+      <div class="admin-table">
+        ${page.items.map((r) => `
+          <div class="admin-report" data-rid="${r.id}">
+            <div class="admin-report-head">
+              <b>${reasonFa[r.reason] ?? esc(r.reason)}</b>
+              <span class="muted">از ${esc(r.reporter.displayName ?? r.reporter.phone)} علیه ${esc(r.reported.displayName ?? r.reported.phone)}</span>
+              <span class="tag-${r.status === 'open' ? 'open' : r.status}">${r.status === 'open' ? 'باز' : r.status === 'resolved' ? 'رسیدگی شد' : 'رد شد'}</span>
+            </div>
+            ${r.note ? `<div class="admin-report-note">«${esc(r.note)}»</div>` : ''}
+            ${r.status === 'open'
+              ? `<div class="admin-report-actions">
+                   <button class="primary small-btn" data-act="resolve">رسیدگی (تأیید تخلف)</button>
+                   <button class="ghost small-btn" data-act="dismiss">رد گزارش</button>
+                 </div>`
+              : `<div class="muted admin-report-actions">${r.resolution ? 'یادداشت: ' + esc(r.resolution) : ''} ${faDate(r.handledAt)}</div>`}
+          </div>`).join('') || '<p class="sub">گزارشی نیست.</p>'}
+      </div>`;
+    box.querySelectorAll('.admin-filter button').forEach((b) => {
+      b.onclick = () => loadAdminReports(box, b.dataset.f || undefined);
+    });
+    box.querySelectorAll('button[data-act]').forEach((b) => {
+      b.onclick = async () => {
+        const rid = b.closest('[data-rid]').dataset.rid;
+        b.disabled = true;
+        try {
+          await apiCall(`/admin/reports/${rid}/handle`, {
+            method: 'POST', token: session.accessToken,
+            body: { action: b.dataset.act },
+          });
+          void loadAdminReports(box, status);
+        } catch (e) {
+          alert(faError(e));
+          b.disabled = false;
+        }
+      };
+    });
+  } catch (e) {
+    box.innerHTML = `<p class="error">${faError(e)}</p>`;
+  }
+}
+
+async function loadAdminAudit(box) {
+  try {
+    const r = await apiCall('/admin/audit?limit=100', { token: session.accessToken });
+    const actionFa = {
+      'user.block': 'مسدودسازی کاربر',
+      'user.unblock': 'رفع مسدودی',
+      'report.resolve': 'رسیدگی به گزارش',
+      'report.dismiss': 'رد گزارش',
+    };
+    box.innerHTML = `
+      <div class="admin-table">
+        ${r.items.map((a) => `
+          <div class="admin-tr audit">
+            <span><b>${actionFa[a.action] ?? esc(a.action)}</b></span>
+            <span class="muted">${esc(a.actorName ?? 'سیستم')}</span>
+            <span class="muted">${faDate(a.createdAt)}</span>
+          </div>`).join('') || '<p class="sub">دفتر خالی است.</p>'}
+      </div>`;
+  } catch (e) {
+    box.innerHTML = `<p class="error">${faError(e)}</p>`;
+  }
+}

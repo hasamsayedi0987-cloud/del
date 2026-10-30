@@ -14,6 +14,7 @@ import { Server, Socket } from 'socket.io';
 import type {
   CallDto,
   MessageDto,
+  WsAccountBlocked,
   WsCallAccepted,
   WsCallEnded,
   WsCallIncoming,
@@ -83,6 +84,20 @@ export class MessagesGateway
       return;
     }
 
+    // حساب مسدودشده (گام ۱۰) — اتصال بلافاصله بسته می‌شود
+    const u = await this.prisma.user.findUnique({
+      where: { id: client.data.userId },
+      select: { blockedAt: true },
+    });
+    if (u?.blockedAt) {
+      client.emit('account.blocked', {
+        code: 'ACCOUNT_BLOCKED',
+        message: 'This account has been blocked',
+      } satisfies WsAccountBlocked);
+      client.disconnect(true);
+      return;
+    }
+
     // عضویت در اتاق همه مکالمه‌های کاربر + اتاق شخصی (برای رویداد conversation.new)
     const parts = await this.prisma.participant.findMany({
       where: { userId: client.data.userId },
@@ -130,6 +145,11 @@ export class MessagesGateway
   isUserOnline(userId: string): boolean {
     const sockets = this.socketsByUser.get(userId);
     return Boolean(sockets && sockets.size > 0);
+  }
+
+  /** تعداد کاربران آنلاین همین حالا — برای متریک‌های پنل ادمین (گام ۱۰) */
+  onlineCount(): number {
+    return this.socketsByUser.size;
   }
 
   /** تغییر حضور را به اتاق شخصی همه هم‌مکالمه‌های کاربر می‌فرستد */
@@ -408,6 +428,18 @@ export class MessagesGateway
       }
     };
     this.events.on('call.ended', this.onCallEnded);
+
+    // ————— گام ۱۰: مسدودسازی حساب توسط ادمین —————
+    this.onAdminBlocked = (p: { userId: string; reason: string | null }) => {
+      this.server?.to(userRoom(p.userId)).emit('account.blocked', {
+        code: 'ACCOUNT_BLOCKED',
+        message: 'This account has been blocked',
+      } satisfies WsAccountBlocked);
+      // قطع فوری همه socketهای کاربر در اتاق شخصی‌اش
+      void this.server?.in(userRoom(p.userId)).disconnectSockets(true);
+      this.logger.warn(`WS kicked all sockets of blocked user=${p.userId}`);
+    };
+    this.events.on('admin.user.blocked', this.onAdminBlocked);
   }
 
   private onMessageCreated?: (message: MessageDto) => void;
@@ -455,6 +487,7 @@ export class MessagesGateway
     lastSeq: number;
     lastMessageAt: string | null;
   }) => void;
+  private onAdminBlocked?: (payload: { userId: string; reason: string | null }) => void;
 
   onModuleDestroy(): void {
     if (this.onMessageCreated) this.events.off('message.created', this.onMessageCreated);
@@ -469,6 +502,7 @@ export class MessagesGateway
     if (this.onMembersAdded) this.events.off('conversation.members_added', this.onMembersAdded);
     if (this.onMemberRemoved) this.events.off('conversation.member_removed', this.onMemberRemoved);
     if (this.onConversationRenamed) this.events.off('conversation.renamed', this.onConversationRenamed);
+    if (this.onAdminBlocked) this.events.off('admin.user.blocked', this.onAdminBlocked);
   }
 }
 

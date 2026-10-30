@@ -33,6 +33,7 @@ function toUserDto(u: {
   avatarUrl: string | null;
   about: string | null;
   aiConsent: boolean;
+  role: string;
   createdAt: Date;
 }): UserDto {
   return {
@@ -42,6 +43,7 @@ function toUserDto(u: {
     avatarUrl: u.avatarUrl,
     about: u.about,
     aiConsent: u.aiConsent,
+    role: u.role as UserDto['role'],
     createdAt: u.createdAt.toISOString(),
   };
 }
@@ -72,7 +74,7 @@ export class AuthService {
       throw httpError(400, 'PHONE_INVALID', 'Phone number format is not valid');
     }
 
-    await this.rateLimit.hit(`otp:ip:${ip}`, 600, 20);
+    await this.rateLimit.hit(`otp:ip:${ip}`, 600, cfg.otpPerIpLimit);
     await this.rateLimit.hit(`otp:phone:${phone}`, cfg.otpPhoneWindowSec, cfg.otpPerPhoneLimit);
 
     const code = String(randomInt(100000, 1000000));
@@ -137,12 +139,21 @@ export class AuthService {
       data: { consumedAt: new Date() },
     });
 
-    // ساخت کاربر در صورت نبود (Upsert)
+    // ساخت کاربر در صورت نبود (Upsert) — شماره‌های ادمین (ADMIN_PHONES) نقش admin می‌گیرند
+    const isAdminPhone = cfg.adminPhones.includes(phone);
     const user = await this.prisma.user.upsert({
       where: { phone },
-      update: { lastSeenAt: new Date() },
-      create: { phone, lastSeenAt: new Date() },
+      update: {
+        lastSeenAt: new Date(),
+        ...(isAdminPhone && { role: 'admin' }),
+      },
+      create: { phone, lastSeenAt: new Date(), role: isAdminPhone ? 'admin' : 'user' },
     });
+
+    // حساب مسدودشده (گام ۱۰) — حتی با کد صحیح ورود نمی‌کند
+    if (user.blockedAt) {
+      throw httpError(403, 'ACCOUNT_BLOCKED', 'This account has been blocked');
+    }
 
     const device = await this.prisma.device.create({
       data: {
@@ -185,6 +196,11 @@ export class AuthService {
 
     if (stored.expiresAt < new Date()) {
       throw httpError(401, 'REFRESH_INVALID', 'Refresh token is invalid or expired');
+    }
+
+    // حساب مسدودشده (گام ۱۰) — چرخش توکن بسته است
+    if (stored.user.blockedAt) {
+      throw httpError(403, 'ACCOUNT_BLOCKED', 'This account has been blocked');
     }
 
     const newTokens = await this.issueTokens(stored.userId, stored.deviceId, cfg);

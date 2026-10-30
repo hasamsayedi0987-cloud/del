@@ -13,6 +13,7 @@ import { CallsModule } from './calls/calls.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { E2eeModule } from './e2ee/e2ee.module';
 import { AiModule } from './ai/ai.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AiModule } from './ai/ai.module';
     NotificationsModule,
     E2eeModule,
     AiModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

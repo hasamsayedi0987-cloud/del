@@ -15,7 +15,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { getSignedUrl, uploadMedia } from '../media';
 import { getSocket, uuid } from '../socket';
 import { theme } from '../theme';
@@ -116,6 +116,72 @@ export function ChatScreen({
 
   // ————— گام ۸: رمزنگاری سرتاسری چت خصوصی —————
   const [e2eeOn, setE2eeOn] = useState(false);
+
+  // ————— گام ۱۰: مسدودسازی و گزارش کاربر —————
+  const [blockedPeer, setBlockedPeer] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
+  const [reportReason, setReportReason] = useState<'spam' | 'abuse' | 'impersonation' | 'other'>('spam');
+  const [reportNote, setReportNote] = useState('');
+
+  useEffect(() => {
+    if (isGroup || !peerId) {
+      setBlockedPeer(false);
+      return;
+    }
+    void api
+      .listBlocks(accessToken)
+      .then((r) => setBlockedPeer(r.items.some((b) => b.userId === peerId)))
+      .catch(() => {});
+  }, [accessToken, isGroup, peerId]);
+
+  const toggleBlockPeer = useCallback(async () => {
+    if (!peerId) return;
+    try {
+      if (blockedPeer) {
+        await api.unblockUser(accessToken, peerId);
+        setBlockedPeer(false);
+        Alert.alert('رفع مسدودسازی', 'گفتگوی مستقیم دوباره آزاد شد.');
+      } else {
+        await api.blockUser(accessToken, peerId);
+        setBlockedPeer(true);
+        Alert.alert('مسدودسازی', 'گفتگوی مستقیم دوطرفه بسته شد.');
+      }
+    } catch (e) {
+      Alert.alert('خطا', e instanceof ApiError ? e.message : 'عملیات انجام نشد');
+    }
+  }, [accessToken, blockedPeer, peerId]);
+
+  const sendReport = useCallback(async () => {
+    if (!peerId) return;
+    try {
+      await api.reportUser(accessToken, peerId, {
+        reason: reportReason,
+        note: reportNote.trim() || undefined,
+      });
+      setReportVisible(false);
+      setReportNote('');
+      Alert.alert('گزارش ثبت شد', 'گزارش شما به صف رسیدگی مدیران رفت. سپاس از همکاری شما.');
+    } catch (e) {
+      Alert.alert('خطا', e instanceof ApiError ? e.message : 'ارسال گزارش انجام نشد');
+    }
+  }, [accessToken, peerId, reportNote, reportReason]);
+
+  const openPeerMenu = useCallback(() => {
+    const peerName = conversation.peer?.displayName ?? conversation.peer?.phone ?? 'کاربر';
+    Alert.alert(
+      peerName,
+      blockedPeer ? 'این کاربر مسدود است.' : 'گزینه‌های گفتگوی خصوصی',
+      [
+        {
+          text: blockedPeer ? 'رفع مسدودسازی' : 'مسدودسازی کاربر',
+          style: blockedPeer ? 'default' : 'destructive',
+          onPress: () => void toggleBlockPeer(),
+        },
+        { text: 'گزارش تخلف', onPress: () => setReportVisible(true) },
+        { text: 'انصراف', style: 'cancel' },
+      ],
+    );
+  }, [blockedPeer, conversation.peer, toggleBlockPeer]);
 
   // ————— گام ۹: هوش مصنوعی (ترجمه/پیشنهاد/خلاصه با رضایت opt-in) —————
   const [aiBusy, setAiBusy] = useState(false);
@@ -626,22 +692,33 @@ export function ChatScreen({
                       : ' '}
           </Text>
         </View>
-        {/* گام ۶: دکمه‌های تماس — فقط گفتگوهای ۱:۱ */}
-        {!isGroup && onRequestCall ? (
+        {/* گام ۶: دکمه‌های تماس + گام ۱۰: منوی گزینه‌ها — فقط گفتگوهای ۱:۱ */}
+        {!isGroup ? (
           <View style={styles.callBtns}>
+            {onRequestCall ? (
+              <>
+                <TouchableOpacity
+                  style={styles.callBtn}
+                  onPress={() => onRequestCall(conversation, 'audio')}
+                  accessibilityLabel="تماس صوتی"
+                >
+                  <Text style={styles.callBtnIcon}>📞</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.callBtn}
+                  onPress={() => onRequestCall(conversation, 'video')}
+                  accessibilityLabel="تماس تصویری"
+                >
+                  <Text style={styles.callBtnIcon}>🎥</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
             <TouchableOpacity
               style={styles.callBtn}
-              onPress={() => onRequestCall(conversation, 'audio')}
-              accessibilityLabel="تماس صوتی"
+              onPress={openPeerMenu}
+              accessibilityLabel="گزینه‌های گفتگو"
             >
-              <Text style={styles.callBtnIcon}>📞</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.callBtn}
-              onPress={() => onRequestCall(conversation, 'video')}
-              accessibilityLabel="تماس تصویری"
-            >
-              <Text style={styles.callBtnIcon}>🎥</Text>
+              <Text style={styles.callBtnIcon}>⋯</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -745,6 +822,64 @@ export function ChatScreen({
             </ScrollView>
             <TouchableOpacity style={styles.aiModalClose} onPress={() => setAiResult(null)}>
               <Text style={styles.aiModalCloseText}>بستن</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {blockedPeer ? (
+        <View style={styles.blockBanner}>
+          <Text style={styles.blockBannerText}>شما این کاربر را مسدود کرده‌اید — گفتگوی مستقیم بسته است</Text>
+          <TouchableOpacity onPress={() => void toggleBlockPeer()}>
+            <Text style={styles.blockBannerBtn}>رفع مسدودی</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {/* گام ۱۰: مودال گزارش تخلف */}
+      <Modal
+        visible={reportVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReportVisible(false)}
+      >
+        <View style={styles.aiModalBackdrop}>
+          <View style={styles.aiModalCard}>
+            <Text style={styles.aiModalTitle}>گزارش تخلف</Text>
+            <View style={styles.reportReasons}>
+              {(
+                [
+                  ['spam', 'هرزنامه'],
+                  ['abuse', 'آزار و اذیت'],
+                  ['impersonation', 'جعل هویت'],
+                  ['other', 'سایر'],
+                ] as const
+              ).map(([value, label]) => (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.reportChip, reportReason === value ? styles.reportChipOn : null]}
+                  onPress={() => setReportReason(value)}
+                >
+                  <Text style={reportReason === value ? styles.reportChipTextOn : styles.reportChipText}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              value={reportNote}
+              onChangeText={setReportNote}
+              placeholder="توضیح (اختیاری)"
+              placeholderTextColor={theme.textDim}
+              style={styles.reportNoteInput}
+              multiline
+              maxLength={1000}
+            />
+            <TouchableOpacity style={styles.aiModalClose} onPress={() => void sendReport()}>
+              <Text style={styles.aiModalCloseText}>ارسال گزارش</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setReportVisible(false)}>
+              <Text style={styles.reportCancelText}>انصراف</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -889,6 +1024,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   aiModalCloseText: { color: '#04121F', fontWeight: '800' },
+  // ————— گام ۱۰ —————
+  blockBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FDECEC',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  blockBannerText: { color: '#C0392B', fontSize: 12, fontWeight: '700', flex: 1, textAlign: 'right' },
+  blockBannerBtn: { color: '#1462B8', fontSize: 12, fontWeight: '800', paddingHorizontal: 8 },
+  reportReasons: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  reportChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  reportChipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
+  reportChipText: { color: theme.text, fontSize: 12 },
+  reportChipTextOn: { color: '#04121F', fontSize: 12, fontWeight: '700' },
+  reportNoteInput: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    color: theme.text,
+    padding: 8,
+    minHeight: 60,
+    textAlignVertical: 'top',
+    marginBottom: 10,
+    textAlign: 'right',
+  },
+  reportCancelText: { color: theme.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' },
   composer: {
     flexDirection: 'row-reverse',
     alignItems: 'flex-end',

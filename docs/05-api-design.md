@@ -89,6 +89,23 @@
 | POST | /ai/translate \| /ai/rewrite \| /ai/summarize \| /ai/suggest | فراخوانی AI (پس از بررسی رضایت؛ خروجی fallback خطا) |
 | GET | /admin/reports · /admin/users · /admin/metrics | پنل مدیریت (نقش admin + audit) |
 
+### ۶.۱ پیاده‌سازی گام ۱۰ — مدیریت، گزارش و مسدودسازی (واقعی)
+
+| متد | مسیر | شرح |
+|---|---|---|
+| POST | /users/:id/report | گزارش کاربر — reason: spam/abuse/impersonation/other + note؛ یک گزارش باز به ازای هر جفت (idempotent)، سقف ۲۰/ساعت |
+| POST / DELETE | /users/:id/block | مسدودسازی دوجانبهٔ DM — ارسال/ساخت DM با زوج مسدود → 403 USER_BLOCKED؛ گروه‌ها مستقل |
+| GET | /users/me/blocks | فهرست مسدودی‌های من |
+| GET | /admin/users?q=&page= | فهرست/جست‌وجوی کاربران با آمار (ادمین) |
+| POST | /admin/users/:id/block · /unblock | مسدودسازی حساب: blockedAt + ابطال نشست‌ها + قطع WS + audit |
+| GET | /admin/reports?status= | صف گزارش‌ها |
+| POST | /admin/reports/:id/handle | resolve/dismiss با یادداشت — 409 REPORT_HANDLED برای تکرار |
+| GET | /admin/metrics | متریک‌ها (کاربران/گفتگو/پیام/رسانه/تماس/گزارش/آنلاین) |
+| GET | /admin/audit | دفتر اقدامات مدیریتی |
+| — | WS `account.blocked` | قطع فوری socketهای حساب مسدودشده |
+
+خطاهای گام ۱۰: `ACCOUNT_BLOCKED` (403 — ورود/توکن/هر API)، `USER_BLOCKED` (403 — DM زوج مسدود)، `ADMIN_ONLY` (403)، `CANNOT_BLOCK_ADMIN`، `CANNOT_BLOCK_SELF`، `CANNOT_REPORT_SELF`، `REPORT_HANDLED` (409)، `NOT_BLOCKED` (409).
+
 ## ۷. رویدادهای WebSocket
 
 اتصال: `wss://.../ws` با access token در handshake (یا اولین message auth). مسیر هر رویداد: `<domain>.<action>`؛ همه رویدادها شامل `server_seq` یا `updated_at` برای مرتب‌سازی و همگام‌سازی.
