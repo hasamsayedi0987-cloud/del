@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
 export class SendMessageDto {
   /** شناسه یگانه پیام تولید سمت کلاینت (UUID) — تضمین تحویل بدون تکرار */
@@ -8,12 +8,18 @@ export class SendMessageDto {
   @IsUUID()
   clientMsgId!: string;
 
-  /** متن یا کپشن — برای پیام رسانه‌ای اختیاری است */
+  /** متن یا کپشن — برای پیام رسانه‌ای اختیاری است؛ در پیام E2EE پاکت رمز است */
   @ApiProperty({ example: 'سلام! این اولین پیام دل است 👋' })
   @IsOptional()
   @IsString()
-  @Length(0, 4000)
+  @Length(0, 30000)
   body?: string;
+
+  /** رمزنگاری سرتاسری (گام ۸) — body پاکت رمز multi-device است */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isE2ee?: boolean;
 
   /** پیام رسانه‌ای (گام ۵) — MediaAsset با status=ready متعلق به خودم در همین مکالمه */
   @ApiPropertyOptional()

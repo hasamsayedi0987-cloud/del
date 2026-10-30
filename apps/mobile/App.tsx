@@ -19,6 +19,7 @@ import { ChatsScreen } from './src/screens/ChatsScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { CallScreen } from './src/screens/CallScreen';
+import { initE2ee } from './src/e2ee/engine';
 import type { CallState } from './src/screens/CallScreen';
 import type { AuthSession, ConversationDto, UserDto } from '@del/shared-types';
 
@@ -92,6 +93,7 @@ export default function App() {
           setRefreshToken(r);
           setUser(u);
           connectSocket(a);
+          void initE2ee(a, u.id); // گام ۸ — شناسه دستگاه + هویت محلی
           setRoute({ name: 'chats' });
           return;
         }
@@ -110,6 +112,7 @@ export default function App() {
     await SecureStore.setItemAsync(KEYS.refresh, session.refreshToken);
     await SecureStore.setItemAsync(KEYS.user, JSON.stringify(session.user));
     connectSocket(session.accessToken);
+    void initE2ee(session.accessToken, session.user.id); // گام ۸
   }, []);
 
   const logout = useCallback(async () => {

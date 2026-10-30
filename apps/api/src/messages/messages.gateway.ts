@@ -34,6 +34,8 @@ interface SendPayload {
   body?: string;
   /** پیام رسانه‌ای (گام ۵) */
   mediaId?: string;
+  /** رمزنگاری سرتاسری (گام ۸) — body پاکت رمز است */
+  isE2ee?: boolean;
 }
 
 interface JoinPayload {
@@ -192,7 +194,7 @@ export class MessagesGateway
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     try {
-      const { conversationId, clientMsgId, body, mediaId } = payload ?? ({} as SendPayload);
+      const { conversationId, clientMsgId, body, mediaId, isE2ee } = payload ?? ({} as SendPayload);
       if (!conversationId || !clientMsgId) {
         return { ok: false, error: { code: 'BAD_PAYLOAD', message: 'conversationId, clientMsgId required' } };
       }
@@ -205,6 +207,7 @@ export class MessagesGateway
         clientMsgId,
         body,
         mediaId,
+        isE2ee === true,
       );
       return { ok: true, ...result };
     } catch (e) {

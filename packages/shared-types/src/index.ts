@@ -66,6 +66,8 @@ export interface MessageDto {
   clientMsgId: string;
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | string;
   body: string;
+  /** رمزنگاری سرتاسری (گام ۸) — body پاکت رمز است؛ کلاینت با کلید خودش باز می‌کند */
+  isE2ee?: boolean;
   /** پیام رسانه‌ای (گام ۵) — متادیتا بدون URL؛ URL کوتاه‌عمر با GET /media/:id/url گرفته می‌شود */
   media?: MediaAssetDto | null;
   createdAt: string;
@@ -349,4 +351,49 @@ export interface SyncUpdates {
   conversations: ConversationDto[];
   /** مکالمه‌هایی که دیگر عضوشان نیستید (اخراج/خروج در دستگاه دیگر) */
   removedConversationIds: string[];
+}
+
+// ————— رمزنگاری سرتاسری (گام ۸) —————
+
+/** وضعیت E2EE خودم — GET /e2ee/status */
+export interface E2eeStatus {
+  /** آیا هویت E2EE روی سرور دارم؟ */
+  identity: boolean;
+  /** آیا پشتیبان (کلید بازیابی) روی سرور هست؟ */
+  backup: boolean;
+  /** تعداد دستگاه‌های دارای هویت */
+  deviceCount: number;
+}
+
+/** هویت عمومی یک دستگاه — GET /e2ee/devices/:userId */
+export interface E2eeDeviceKeys {
+  deviceId: string;
+  ikEd: string;
+  ikX: string;
+  spkKeyId: number;
+  spk: string;
+  spkSig: string;
+  /** کلیدهای یک‌بارمصرف باقی‌مانده (برای top-up سمت صاحب کلید) */
+  otkCount: number;
+  createdAt: string;
+}
+
+/** بسته کامل برای X3DH — GET /e2ee/bundle/:userId (یک OTK مصرف می‌شود) */
+export interface E2eeBundle {
+  userId: string;
+  deviceId: string;
+  ikEd: string;
+  ikX: string;
+  spkKeyId: number;
+  spk: string;
+  spkSig: string;
+  /** null = OTK ته کشیده — X3DH بدون DH4 */
+  otk: { keyId: number; key: string } | null;
+}
+
+/** پشتیبان هویت — GET /e2ee/backup (blob رمز است؛ کلید بازیابی نزد کاربر است) */
+export interface E2eeBackup {
+  blob: string;
+  salt: string;
+  updatedAt: string;
 }

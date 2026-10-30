@@ -17,6 +17,13 @@ import { api } from '../api';
 import { getSignedUrl, uploadMedia } from '../media';
 import { getSocket, uuid } from '../socket';
 import { theme } from '../theme';
+import {
+  decryptDirect,
+  encryptDirect,
+  e2eeReady,
+  peerSupportsE2ee,
+  topUpOtksIfNeeded,
+} from '../e2ee/engine';
 import type {
   ConversationDto,
   MediaAssetDto,
@@ -105,6 +112,45 @@ export function ChatScreen({
     messagesRef.current = messages;
   }, [messages]);
 
+  // ————— گام ۸: رمزنگاری سرتاسری چت خصوصی —————
+  const [e2eeOn, setE2eeOn] = useState(false);
+
+  /** پیام E2EE → متن؛ اگر این دستگاه گیرنده نبود/کلید نبود → placeholder */
+  const tryDecrypt = useCallback(
+    async (m: MessageDto): Promise<LocalMsg> => {
+      if (!m.isE2ee) return m;
+      try {
+        const r = await decryptDirect(accessToken, m.conversationId, m.senderId, m.body);
+        if (r.ok) return { ...m, body: r.text };
+      } catch {
+        // پایین‌تر placeholder
+      }
+      return {
+        ...m,
+        body:
+          m.senderId === myUserId
+            ? '\ud83d\udd12 پیام شما از دستگاه دیگر — در این دستگاه باز نمی\u200cشود'
+            : '\ud83d\udd12 پیام رمزنگاری\u200cشده — در این دستگاه باز نمی\u200cشود',
+      };
+    },
+    [accessToken, myUserId],
+  );
+
+  // فعال‌سازی E2EE وقتی هر دو طرف هویت دارند — فقط direct
+  useEffect(() => {
+    if (isGroup || !peerId) return;
+    let cancelled = false;
+    (async () => {
+      if (!e2eeReady()) return;
+      const ok = await peerSupportsE2ee(accessToken, peerId);
+      if (!cancelled && ok) setE2eeOn(true);
+      void topUpOtksIfNeeded(accessToken);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, peerId, isGroup]);
+
   const convId = conversation.id;
 
   /** افزودن/به‌روزرسانی پیام با dedupe روی clientMsgId */
@@ -126,7 +172,10 @@ export function ChatScreen({
       try {
         const page = await api.getMessages(accessToken, convId);
         if (cancelled) return;
-        setMessages(page.messages);
+        // پیام‌های رمز به ترتیب صعودی باز می‌شوند (ratchet ترتیب‌مند است)
+        const decrypted: LocalMsg[] = [];
+        for (const m of page.messages) decrypted.push(await tryDecrypt(m));
+        setMessages(decrypted);
         setHasMore(page.hasMore);
         const latest = page.messages[page.messages.length - 1];
         if (latest) void api.markRead(accessToken, convId, latest.serverSeq).catch(() => undefined);
@@ -166,8 +215,18 @@ export function ChatScreen({
 
     const onNew = (payload: WsMessageNew) => {
       if (payload.conversationId !== convId) return;
-      upsert(payload.message);
-      void api.markRead(accessToken, convId, payload.message.serverSeq).catch(() => undefined);
+      void (async () => {
+        // پیام خودِ این دستگاه (echo) — متن موضعی حفظ می‌شود
+        const known = messagesRef.current.find((m) => m.clientMsgId === payload.message.clientMsgId);
+        if (known) {
+          upsert({ ...payload.message, body: known.body, status: 'sent' });
+        } else if (payload.message.isE2ee) {
+          upsert(await tryDecrypt(payload.message));
+        } else {
+          upsert(payload.message);
+        }
+        void api.markRead(accessToken, convId, payload.message.serverSeq).catch(() => undefined);
+      })();
     };
     const onPresence = (p: WsPresenceUpdate) => {
       if (p.userId !== peerId) return;
@@ -209,9 +268,13 @@ export function ChatScreen({
       if (maxSeq > 0) {
         void api
           .getMessages(accessToken, convId, undefined, maxSeq)
-          .then((page) => {
+          .then(async (page) => {
             if (cancelled || !page.messages.length) return;
-            page.messages.forEach(upsert);
+            for (const m of page.messages) {
+              const known = messagesRef.current.some((x) => x.clientMsgId === m.clientMsgId);
+              if (known) continue;
+              upsert(m.isE2ee ? await tryDecrypt(m) : m);
+            }
             const latest = page.messages[page.messages.length - 1];
             if (latest) {
               void api.markRead(accessToken, convId, latest.serverSeq).catch(() => undefined);
@@ -243,7 +306,7 @@ export function ChatScreen({
       s?.off('member.removed', onMemberRemoved);
       s?.off('connect', onReconnect);
     };
-  }, [accessToken, convId, peerId, upsert, isGroup, myUserId, senderName]);
+  }, [accessToken, convId, peerId, upsert, isGroup, myUserId, senderName, tryDecrypt]);
 
   /** ارسال پیام رسانه‌ای — آپلود مستقیم به S3 سپس پیام با mediaId */
   const sendMedia = useCallback(async () => {
@@ -345,6 +408,7 @@ export function ChatScreen({
       clientMsgId,
       type: 'text',
       body,
+      isE2ee: e2eeOn,
       createdAt: new Date().toISOString(),
       editedAt: null,
       deletedAt: null,
@@ -352,6 +416,42 @@ export function ChatScreen({
     };
     upsert(optimistic);
     setDraft('');
+
+    // گام ۸: چت خصوصی با هویت هر دو طرف ← پاکت multi-device رمز می‌شود
+    if (!isGroup && e2eeOn && peerId) {
+      try {
+        const envelope = await encryptDirect(accessToken, convId, peerId, body);
+        const s = getSocket();
+        if (s?.connected) {
+          s.timeout(15000).emit(
+            'message.send',
+            { conversationId: convId, clientMsgId, body: envelope, isE2ee: true },
+            (err: unknown, ack?: { ok: boolean; message?: MessageDto }) => {
+              if (!err && ack?.ok && ack.message) {
+                // متن موضعی حفظ می‌شود — body پاکت رمز است
+                upsert({ ...ack.message, body, isE2ee: true, status: 'sent' });
+              } else {
+                void (async () => {
+                  try {
+                    const r = await api.sendMessageRest(accessToken, convId, clientMsgId, envelope, undefined, true);
+                    upsert({ ...r.message, body, isE2ee: true, status: 'sent' });
+                  } catch {
+                    upsert({ ...optimistic, status: 'failed' });
+                  }
+                })();
+              }
+            },
+          );
+        } else {
+          const r = await api.sendMessageRest(accessToken, convId, clientMsgId, envelope, undefined, true);
+          upsert({ ...r.message, body, isE2ee: true, status: 'sent' });
+        }
+      } catch {
+        upsert({ ...optimistic, status: 'failed' });
+        Alert.alert('خطا', 'رمزگذاری پیام ناموفق بود — دوباره تلاش کنید.');
+      }
+      return;
+    }
 
     // تلاش مسیر WS با fallback به REST
     const s = getSocket();
@@ -375,7 +475,7 @@ export function ChatScreen({
         upsert({ ...optimistic, status: 'failed' });
       }
     }
-  }, [draft, convId, myUserId, accessToken, upsert]);
+  }, [draft, convId, myUserId, accessToken, upsert, isGroup, e2eeOn, peerId]);
 
   const loadOlder = useCallback(async () => {
     const first = messages[0];
@@ -413,6 +513,7 @@ export function ChatScreen({
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerName} numberOfLines={1}>
+            {e2eeOn && !isGroup ? '\ud83d\udd12 ' : ''}
             {isGroup
               ? conversation.title ?? groupDetail?.title ?? 'گروه'
               : conversation.peer?.displayName ?? conversation.peer?.phone ?? 'گفتگو'}
@@ -428,10 +529,14 @@ export function ChatScreen({
               : isGroup
                 ? `${faNum(memberCount)} عضو${groupDetail?.myRole === 'admin' ? ' · شما ادمین هستید' : ''}`
                 : peerPresence?.online
-                  ? 'آنلاین'
-                  : peerPresence?.lastSeen
-                    ? `آخرین بازدید ${faRelative(peerPresence.lastSeen)}`
-                    : ' '}
+                  ? e2eeOn
+                    ? 'آنلاین · رمزنگاری سرتاسری فعال'
+                    : 'آنلاین'
+                  : e2eeOn
+                    ? 'رمزنگاری سرتاسری فعال'
+                    : peerPresence?.lastSeen
+                      ? `آخرین بازدید ${faRelative(peerPresence.lastSeen)}`
+                      : ' '}
           </Text>
         </View>
         {/* گام ۶: دکمه‌های تماس — فقط گفتگوهای ۱:۱ */}

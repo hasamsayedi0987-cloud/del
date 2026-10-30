@@ -19,7 +19,8 @@
 | **گام ۵** | **رسانه: آپلود/دانلود Presigned (S3/MinIO)، magic bytes، بندانگشتی، پیام رسانه‌ای بلادرنگ** | ✅ **اجرا و تست دود شد (۳۲/۳۲)** |
 | **گام ۶** | **تماس صوتی/تصویری ۱:۱: signaling روی WS، توکن LiveKit، UI تماس کامل، تاریخچه، مشغولی، timeout** | ✅ **اجرا و تست دود شد (۴۴/۴۴)** |
 | **گام ۷** | **اعلان‌ها: registry توکن push + providerهای Expo/webhook + اعلان بومی دسکتاپ + اعلان محلی موبایل + sync/bootstrap + sync/updates** | ✅ **اجرا و تست دود شد (۲۵/۲۵)** |
-| گام ۸ | رمزنگاری سرتاسری (E2EE) چت خصوصی + بازیابی حساب با کلید بازیابی | ⬜ بعدی |
+| **گام ۸** | **رمزنگاری سرتاسری (E2EE) چت خصوصی: X3DH + Double Ratchet، چنددستگاهی، کلید بازیابی حساب** | ✅ **اجرا و تست دود شد (۳۵/۳۵)** |
+| فاز ۷ | هوش مصنوعی (AI) | ⬜ بعدی |
 
 ### آنچه در گام ۱ واقعاً ساخته و تست شده است
 
@@ -152,10 +153,10 @@ bash scripts/smoke-step1.sh
 
 ```
 apps/            mobile (Expo) · desktop (Electron) · api (NestJS)
-packages/        shared-types (فعال) · validation · api-client · design-system · config
+packages/        shared-types · e2ee (X3DH + Double Ratchet) · api-client · design-system · config · validation
 docs/            ۹ سند فاز ۱ + docs/implementation/ (سند هر گام)
 infrastructure/  docker-compose.dev.yml · docker-compose.prod.yml
-scripts/         smoke-step1.sh تا smoke-step7.js (تست‌های دود)
+scripts/         smoke-step1.sh تا smoke-step8.js (تست‌های دود)
 ci/              سه workflow GitHub Actions (فعال‌سازی: ci/README.md)
 ```
 
@@ -165,3 +166,12 @@ ci/              سه workflow GitHub Actions (فعال‌سازی: ci/README.md
 - هیچ secret واقعی کامیت نمی‌شود (فقط `.env.example`)
 - مستندات بخشی از Definition of Done است
 - قابلیت ناقص، ناقص اعلام می‌شود — شفافیت روی وضعیت، اصل محصول است
+
+## آنچه در گام ۸ واقعاً ساخته و تست شده است
+
+- **`packages/e2ee`** — پیاده‌سازی کامل X3DH + Double Ratchet (الگوی Signal) با X25519/Ed25519 و ChaCha20-Poly1305 و HKDF-SHA256؛ باندل خودکفا (CJS برای Node/Metro + IIFE برای Electron)؛ همگام‌سازی چنددستگاهی با پاکت multi-device و خود-دستگاه
+- **API:** ماژول `e2ee` — registry کلیدهای عمومی به تفکیک دستگاه، مصرف اتمیک کلید یک‌بارمصرف در bundle، پشتیبان رمزشده هویت (بدون کلید بازیابی)، ریست هویت؛ مهاجرت `e2ee_keys`
+- **پیام رمز:** فیلد `isE2ee` روی Message (REST + WS) — سرور پاکت رمز را دست‌نخورده نگه می‌دارد؛ پیش‌نمایش امن «🔒 پیام رمزنگاری‌شده» در لیست گفتگوها
+- **موبایل:** بنر فعال‌سازی + مودال سه‌مرحله‌ای (راه‌اندازی/نمایش کلید بازیابی/بازیابی)، آیکون 🔒 در چت، رمز/باز کردن خودکار، پر کردن خودکار OTK — خصوصی‌ها در SecureStore، RNG از expo-crypto
+- **دسکتاپ:** همان جریان در Electron با باندل `DelE2ee`، مودال سه‌مرحله‌ای، اعلان امن بدون فاش‌کردن محتوا
+- **تست دود ۳۵ سناریویی** — `scripts/smoke-step8.js`: توافق X3DH واقعی روی سیم، زنجیره DH ratchet، پیام ردشده (out-of-order)، دستکاری ciphertext، **نابینایی سرور با خواندن مستقیم DB**، چنددستگاهی + خود-دستگاه، بازیابی حساب با کلید بازیابی، امنیت پشتیبان — همه سبز؛ رگرسیون گام‌های ۱ تا ۷ نیز سبز (۲۰۷ چک در کل)

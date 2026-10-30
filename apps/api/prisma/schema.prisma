@@ -28,6 +28,8 @@ model User {
   mediaAssets    MediaAsset[]
   callsPlaced    Call[]         @relation("callsPlaced")
   callsReceived  Call[]         @relation("callsReceived")
+  e2eeIdentities E2eeIdentity[]
+  e2eeBackup     E2eeKeyBackup?
 }
 
 model Device {
@@ -122,6 +124,8 @@ model Message {
   clientMsgId    String // UUID تولیدشده سمت کلاینت — تضمین تحویل idempotent
   type           String    @default("text") // text | image | video | audio | file (رسانه — گام ۵)
   body           String
+  /** رمزنگاری سرتاسری (گام ۸) — body پاکت رمز است و سرور محتوایش را نمی‌فهمد */
+  isE2ee         Boolean   @default(false)
   mediaId        String?   @db.Uuid
   createdAt      DateTime  @default(now())
   editedAt       DateTime?
@@ -191,4 +195,52 @@ model Call {
   @@index([calleeId])
   @@index([calleeId, status])
   @@index([callerId, status])
+}
+
+// ————— رمزنگاری سرتاسری (گام ۸) —————
+// فقط کلیدهای «عمومی» روی سرور می‌نشینند — خصوصی‌ها هرگز از دستگاه خارج نمی‌شوند
+// به‌جز پشتیبانِ رمزشده با کلید بازیابی (E2eeKeyBackup) که سرور کلیدش را ندارد
+
+model E2eeIdentity {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  deviceId  String // UUID دستگاه (از JWT did) — هر دستگاه یک هویت
+  ikEd      String // کلید عمومی امضای هویت (Ed25519, b64)
+  ikX       String // کلید عمومی DH هویت (X25519, b64)
+  spkKeyId  Int
+  spk       String // کلید عمومی پیش‌امضاشده (b64)
+  spkSig    String // امضای spk با ikEd (b64)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  otks E2eeOneTimePreKey[]
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+}
+
+model E2eeOneTimePreKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  identityId String    @db.Uuid
+  keyId      Int
+  pubKey     String // b64
+  usedAt     DateTime? // با دریافت bundle مصرف می‌شود (یگانه)
+  createdAt  DateTime  @default(now())
+
+  identity E2eeIdentity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@unique([identityId, keyId])
+  @@index([identityId, usedAt])
+}
+
+/** پشتیبان هویت — blob رمزشده با کلید مشتق از کلید بازیابی کاربر (AES/HKDF سمت دستگاه) */
+model E2eeKeyBackup {
+  userId    String   @id @db.Uuid
+  blob      String
+  salt      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

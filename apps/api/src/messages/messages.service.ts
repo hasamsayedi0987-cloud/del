@@ -35,6 +35,7 @@ export function toMessageDto(m: {
   clientMsgId: string;
   type: string;
   body: string;
+  isE2ee?: boolean;
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
@@ -48,12 +49,16 @@ export function toMessageDto(m: {
     clientMsgId: m.clientMsgId,
     type: m.type,
     body: m.body,
+    isE2ee: Boolean(m.isE2ee),
     media: m.media ? toMediaDtoShallow(m.media) : null,
     createdAt: m.createdAt.toISOString(),
     editedAt: m.editedAt?.toISOString() ?? null,
     deletedAt: m.deletedAt?.toISOString() ?? null,
   };
 }
+
+/** پیش‌نمایش امن — محتوای پیام رمز هرگز به سرور فاش نیست و پیش‌نمایش هم نمی‌شود */
+export const E2EE_PREVIEW = '\ud83d\udd12 \u067e\u06cc\u0627\u0645 \u0631\u0645\u0632\u0646\u06af\u0627\u0631\u06cc\u200c\u0634\u062f\u0647';
 
 interface MediaAssetDtoSource {
   id: string;
@@ -199,7 +204,7 @@ export class MessagesService {
       unreadCount,
       lastMessage: conv.messages[0]
         ? {
-            body: conv.messages[0].body,
+            body: conv.messages[0].isE2ee ? E2EE_PREVIEW : conv.messages[0].body,
             createdAt: conv.messages[0].createdAt.toISOString(),
             senderId: conv.messages[0].senderId,
           }
@@ -249,7 +254,7 @@ export class MessagesService {
           unreadCount,
           lastMessage: conv.messages[0]
             ? {
-                body: conv.messages[0].body,
+                body: conv.messages[0].isE2ee ? E2EE_PREVIEW : conv.messages[0].body,
                 createdAt: conv.messages[0].createdAt.toISOString(),
                 senderId: conv.messages[0].senderId,
               }
@@ -337,6 +342,7 @@ export class MessagesService {
     clientMsgId: string,
     body: string | undefined,
     mediaId?: string,
+    isE2ee = false,
   ): Promise<SendResult> {
     await this.requireParticipant(meId, conversationId);
 
@@ -357,7 +363,14 @@ export class MessagesService {
       media = { id: asset.id, kind: asset.kind, originalName: asset.originalName };
     }
 
-    const text = (body ?? '').trim();
+    // پیام رمز: پاکت JSON دست‌نخورده می‌ماند (بدون trim) — سرور فقط بایت‌های رمز را ذخیره می‌کند
+    const text = isE2ee ? (body ?? '') : (body ?? '').trim();
+    if (isE2ee && text.length > 30000) {
+      throw httpError(400, 'E2EE_ENVELOPE_TOO_LARGE', 'Encrypted envelope is too large');
+    }
+    if (!isE2ee && !media && text.length > 4000) {
+      throw httpError(400, 'MESSAGE_TOO_LONG', 'Plain messages are limited to 4000 characters');
+    }
     if (!media && !text) {
       throw httpError(400, 'EMPTY_MESSAGE', 'Message body or mediaId is required');
     }
@@ -385,6 +398,7 @@ export class MessagesService {
           clientMsgId,
           type: media ? media.kind : 'text',
           body: text || media?.originalName || '',
+          isE2ee,
           ...(media ? { mediaId: media.id } : {}),
         },
         include: { media: { select: MEDIA_SELECT } },

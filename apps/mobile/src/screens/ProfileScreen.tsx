@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Text, TextInput, View, StyleSheet } from 'react-native';
 import { api } from '../api';
 import { theme } from '../theme';
 import { Button, Card, Screen, Subtitle, Title } from '../components/ui';
+import { e2eeIdentityPublic } from '../e2ee/engine';
+import { e2eeStore } from '../e2ee/store';
 import type { UserDto } from '@del/shared-types';
 
 export function ProfileScreen({
@@ -20,6 +22,17 @@ export function ProfileScreen({
 }) {
   const [name, setName] = useState(user.displayName ?? '');
   const [saving, setSaving] = useState(false);
+
+  // ————— گام ۸: وضعیت رمزنگاری —————
+  const [e2eeActive, setE2eeActive] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  useEffect(() => {
+    (async () => {
+      setE2eeActive(Boolean(e2eeIdentityPublic()));
+      setRecoveryKey(await e2eeStore.getRecoveryKey());
+    })();
+  }, []);
 
   const save = async () => {
     setSaving(true);
@@ -58,6 +71,23 @@ export function ProfileScreen({
       />
 
       <Button label="ذخیره" onPress={save} busy={saving} />
+
+      <Text style={styles.section}>رمزنگاری سرتاسری</Text>
+      <Card>
+        <Row
+          label="وضعیت"
+          value={e2eeActive ? '🔒 فعال (X3DH + Double Ratchet)' : 'غیرفعال — از صفحه گفتگوها فعال کنید'}
+        />
+        <Row
+          label="کلید بازیابی"
+          value={recoveryKey ? (showRecovery && recoveryKey ? recoveryKey : 'ذخیره‌شده — نمایش') : 'روی این دستگاه نیست'}
+        />
+        {recoveryKey ? (
+          <Text style={styles.recoveryToggle} onPress={() => setShowRecovery((v) => !v)}>
+            {showRecovery ? 'پنهان کردن کلید' : 'نمایش کلید بازیابی'}
+          </Text>
+        ) : null}
+      </Card>
 
       <View style={styles.bottom}>
         <Button label="خروج از حساب" variant="danger" onPress={onLogout} />
@@ -110,6 +140,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 18,
     marginTop: 24,
+  },
+  recoveryToggle: {
+    color: theme.accent,
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 6,
+    paddingVertical: 4,
   },
   bottom: {
     marginTop: 'auto',

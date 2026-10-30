@@ -280,3 +280,26 @@ button.small-btn { width: auto; margin: 4px auto 0; padding: 8px 16px; font-size
 .call-info.compact { margin-top: 24px; }
 .call-info.compact .call-avatar { width: 56px; height: 56px; font-size: 24px; }
 .call-info.compact .call-peer-name { font-size: 17px; }
+
+/* ————— گام ۸: رمزنگاری سرتاسری ————— */
+.e2ee-banner {
+  margin: 10px 0 6px;
+  width: 100%;
+  text-align: right;
+  border-color: #34D399;
+  color: #A7F3D0;
+  background: rgba(52, 211, 153, 0.08);
+}
+.recovery-key {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  color: #7DD3FC;
+  background: rgba(2, 12, 27, 0.55);
+  border: 1px solid #1E3A5F;
+  border-radius: 10px;
+  padding: 14px 10px;
+  text-align: center;
+  word-break: break-all;
+  margin-bottom: 12px;
+}

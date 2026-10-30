@@ -5,6 +5,12 @@ import { getSocket } from '../socket';
 import { theme } from '../theme';
 import { Button, Logo, Screen, Subtitle, Title } from '../components/ui';
 import { faError } from './LoginPhoneScreen';
+import {
+  e2eeReady,
+  publishIdentity,
+  restoreWithRecoveryKey,
+  setupNewIdentity,
+} from '../e2ee/engine';
 import type {
   ConversationDto,
   WsConversationNew,
@@ -35,6 +41,68 @@ export function ChatsScreen({
   const [groupPhones, setGroupPhones] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // ————— گام ۸: راه‌اندازی رمزنگاری سرتاسری —————
+  /** choose | show-key | restore | null */
+  const [e2eeModal, setE2eeModal] = useState<null | 'choose' | 'show-key' | 'restore'>(null);
+  const [recoveryKeyShown, setRecoveryKeyShown] = useState('');
+  const [recoveryInput, setRecoveryInput] = useState('');
+  const [hasServerBackup, setHasServerBackup] = useState(false);
+  const [e2eeActive, setE2eeActive] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setE2eeActive(e2eeReady());
+      try {
+        await api.e2eeGetBackup(accessToken);
+        setHasServerBackup(true);
+      } catch {
+        setHasServerBackup(false);
+      }
+    })();
+  }, [accessToken]);
+
+  /** راه‌اندازی تازه — کلید بازیابی ساخته و یک‌بار نمایش داده می‌شود */
+  const startE2eeSetup = async () => {
+    setDialogError(null);
+    setBusy(true);
+    try {
+      const key = await setupNewIdentity(accessToken);
+      await publishIdentity(accessToken);
+      setRecoveryKeyShown(key);
+      setE2eeModal('show-key');
+    } catch (e) {
+      setDialogError(e instanceof ApiError ? faError(e) : 'خطا در راه‌اندازی رمزنگاری');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** بازیابی هویت قبلی با کلید بازیابی */
+  const restoreE2ee = async () => {
+    setDialogError(null);
+    if (recoveryInput.replace(/[^0-9a-fA-F]/g, '').length < 32) {
+      setDialogError('کلید بازیابی ۶۴ کاراکتر hex است');
+      return;
+    }
+    setBusy(true);
+    try {
+      await restoreWithRecoveryKey(accessToken, recoveryInput);
+      await publishIdentity(accessToken);
+      setE2eeModal(null);
+      setRecoveryInput('');
+      setE2eeActive(true);
+      Alert.alert('بازیابی شد', 'هویت رمزنگاری شما بازگردانده شد.\u200cپیام‌های جدید رمزنگاری می\u200cشوند.');
+    } catch (e) {
+      setDialogError(
+        e instanceof ApiError && e.code === 'E2EE_BACKUP_MISSING'
+          ? 'پشتیبانی روی سرور نیست — راه‌اندازی تازه را انتخاب کنید'
+          : 'کلید بازیابی اشتباه است',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -169,14 +237,27 @@ export function ChatsScreen({
 
       {loading ? (
         <Subtitle>در حال بارگذاری…</Subtitle>
-      ) : convs.length === 0 ? (
-        <View style={{ marginTop: 48 }}>
-          <Logo size={72} />
-          <Title>هنوز گفتگویی ندارید</Title>
-          <Subtitle>با «+ جدید» گفتگوی شخصی و با «+ گروه» گروه بسازید</Subtitle>
-        </View>
       ) : (
-        <FlatList
+        <>
+          {!e2eeActive && !loading ? (
+            <TouchableOpacity style={styles.e2eeBanner} onPress={() => { setDialogError(null); setE2eeModal('choose'); }}>
+              <Text style={styles.e2eeBannerIcon}>\ud83d\udd12</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.e2eeBannerTitle}>فعال\u200cسازی رمزنگاری سرتاسری</Text>
+                <Text style={styles.e2eeBannerSub}>
+                  پیام\u200cهای خصوصی فقط روی دستگاه شما و طرف مقابل باز می\u200cشوند
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
+          {convs.length === 0 ? (
+            <View style={{ marginTop: 32 }}>
+              <Logo size={72} />
+              <Title>هنوز گفتگویی ندارید</Title>
+              <Subtitle>با «+ جدید» گفتگوی شخصی و با «+ گروه» گروه بسازید</Subtitle>
+            </View>
+          ) : (
+            <FlatList
           data={convs}
           keyExtractor={(c) => c.id}
           renderItem={({ item }) => {
@@ -210,6 +291,8 @@ export function ChatsScreen({
             );
           }}
         />
+          )}
+        </>
       )}
 
       <Modal visible={newDialog} transparent animationType="fade">
@@ -264,6 +347,76 @@ export function ChatsScreen({
                 <Button label="انصراف" variant="ghost" onPress={() => setNewDialog(false)} />
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={e2eeModal !== null} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            {e2eeModal === 'choose' ? (
+              <>
+                <Title>🔒 رمزنگاری سرتاسری</Title>
+                <Subtitle>
+                  پیام‌های گفتگوهای خصوصی با الگوی Signal (X3DH + Double Ratchet) رمز می‌شوند و سرور
+                  فقط متن رمز را می‌بیند.
+                </Subtitle>
+                <Button
+                  label="راه‌اندازی تازه — کلید بازیابی جدید"
+                  onPress={startE2eeSetup}
+                  busy={busy}
+                />
+                {hasServerBackup ? (
+                  <Button
+                    label="بازیابی با کلید بازیابی"
+                    variant="ghost"
+                    onPress={() => {
+                      setDialogError(null);
+                      setE2eeModal('restore');
+                    }}
+                  />
+                ) : null}
+                {dialogError ? <Text style={styles.error}>{dialogError}</Text> : null}
+                <Button label="بعداً" variant="ghost" onPress={() => setE2eeModal(null)} />
+              </>
+            ) : e2eeModal === 'show-key' ? (
+              <>
+                <Title>کلید بازیابی خود را نگه دارید</Title>
+                <Subtitle>
+                  این کلید تنها راه بازگرداندن هویت رمزنگاری روی دستگاه تازه است. دوباره نمایش داده
+                  نمی‌شود — جایی امن بنویسید.
+                </Subtitle>
+                <View style={styles.recoveryBox}>
+                  <Text style={styles.recoveryKey}>{recoveryKeyShown}</Text>
+                </View>
+                <Button
+                  label="آن را ذخیره کردم"
+                  onPress={() => {
+                    setE2eeModal(null);
+                    setE2eeActive(true);
+                    Alert.alert('فعال شد', 'رمزنگاری سرتاسری برای گفتگوهای خصوصی فعال است.');
+                  }}
+                />
+                <Button label="انصراف" variant="ghost" onPress={() => setE2eeModal(null)} />
+              </>
+            ) : e2eeModal === 'restore' ? (
+              <>
+                <Title>بازیابی هویت رمزنگاری</Title>
+                <Subtitle>کلید بازیابی ۶۴ کاراکتری خود را وارد کنید</Subtitle>
+                <TextInput
+                  value={recoveryInput}
+                  onChangeText={setRecoveryInput}
+                  placeholder="xxxx xxxx xxxx xxxx …"
+                  placeholderTextColor={theme.textDim}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  multiline
+                  style={[styles.modalInput, { minHeight: 90, textAlignVertical: 'top' }]}
+                />
+                {dialogError ? <Text style={styles.error}>{dialogError}</Text> : null}
+                <Button label="بازیابی" onPress={restoreE2ee} busy={busy} />
+                <Button label="انصراف" variant="ghost" onPress={() => setE2eeModal(null)} />
+              </>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -379,4 +532,34 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   error: { color: theme.danger, textAlign: 'right', marginTop: 10, fontSize: 13 },
+  e2eeBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: theme.radius,
+    padding: 14,
+    marginTop: 8,
+  },
+  e2eeBannerIcon: { fontSize: 26 },
+  e2eeBannerTitle: { color: theme.text, fontSize: 15, fontWeight: '800', textAlign: 'right' },
+  e2eeBannerSub: { color: theme.textDim, fontSize: 12, marginTop: 2, textAlign: 'right' },
+  recoveryBox: {
+    backgroundColor: theme.surface,
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: theme.radius,
+    padding: 14,
+    marginVertical: 14,
+  },
+  recoveryKey: {
+    color: theme.accent,
+    fontFamily: 'monospace',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: 1,
+  },
 });

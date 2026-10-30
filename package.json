@@ -1,6 +1,6 @@
 {
   "name": "del",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Del (دل) — secure cross-platform messenger for iOS, Android, Windows and macOS",
   "packageManager": "pnpm@9.12.0",
@@ -22,6 +22,7 @@
     "pg": "^8.23.1",
     "socket.io-client": "^4.8.4",
     "turbo": "^2.3.3",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "@del/e2ee": "workspace:*"
   }
 }

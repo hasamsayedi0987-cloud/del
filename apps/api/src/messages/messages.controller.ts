@@ -71,7 +71,14 @@ export class MessagesController {
     @Param('id') id: string,
     @Body() dto: SendMessageDto,
   ): Promise<{ message: MessageDto; duplicate: boolean }> {
-    return this.messages.sendMessage(req.user.sub, id, dto.clientMsgId, dto.body, dto.mediaId);
+    return this.messages.sendMessage(
+      req.user.sub,
+      id,
+      dto.clientMsgId,
+      dto.body,
+      dto.mediaId,
+      dto.isE2ee === true,
+    );
   }
 
   /** علامت‌گذاری خواندن تا lastReadSeq */

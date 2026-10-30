@@ -48,6 +48,7 @@
       </span>
     </div>
     <div id="chatList" class="list"></div>
+    <button id="e2eeBanner" class="ghost e2ee-banner hidden">🔒 فعال‌سازی رمزنگاری سرتاسری گفتگوهای خصوصی</button>
     <div class="status-row">
       <span id="wsDot" class="dot"></span><span id="wsText">اتصال بلادرنگ…</span>
     </div>
@@ -89,7 +90,9 @@
       <div class="row"><span class="lbl">شماره</span><span id="mePhone" class="val"></span></div>
       <div class="row"><span class="lbl">نام نمایشی</span><span id="meName" class="val"></span></div>
       <div class="row"><span class="lbl">شناسه</span><span id="meId" class="val"></span></div>
+      <div class="row"><span class="lbl">رمزنگاری سرتاسری</span><span id="e2eeStatus" class="val"></span></div>
     </div>
+    <button id="showRecovery" class="ghost hidden">نمایش کلید بازیابی</button>
 
     <label class="section" for="displayName">نام نمایشی</label>
     <input id="displayName" type="text" placeholder="مثلاً: علی" />
@@ -128,6 +131,40 @@
     </div>
   </div>
 
+  <!-- رمزنگاری سرتاسری (گام ۸) -->
+  <div id="e2eeModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <!-- مرحله ۱: انتخاب -->
+      <div id="e2eeStepChoose">
+        <h1>🔒 رمزنگاری سرتاسری</h1>
+        <p class="sub">
+          پیام‌های گفتگوهای خصوصی با الگوی Signal (X3DH + Double Ratchet) رمز می‌شوند و سرور فقط
+          متن رمز را می‌بیند.
+        </p>
+        <button id="e2eeNew" class="primary">راه‌اندازی تازه — کلید بازیابی جدید</button>
+        <button id="e2eeRestoreStep" class="ghost hidden">بازیابی با کلید بازیابی</button>
+        <div id="e2eeChooseError" class="error"></div>
+        <button id="e2eeClose" class="ghost">بعداً</button>
+      </div>
+      <!-- مرحله ۲: نمایش کلید بازیابی -->
+      <div id="e2eeStepShowKey" class="hidden">
+        <h1>کلید بازیابی خود را نگه دارید</h1>
+        <p class="sub">این کلید تنها راه بازگرداندن هویت رمزنگاری روی دستگاه تازه است و دوباره نمایش داده نمی‌شود.</p>
+        <div id="e2eeRecoveryKey" class="recovery-key"></div>
+        <button id="e2eeSaved" class="primary">آن را ذخیره کردم</button>
+      </div>
+      <!-- مرحله ۳: بازیابی -->
+      <div id="e2eeStepRestore" class="hidden">
+        <h1>بازیابی هویت رمزنگاری</h1>
+        <p class="sub">کلید بازیابی ۶۴ کاراکتری خود را وارد کنید</p>
+        <textarea id="e2eeRecoveryInput" rows="3" dir="ltr" placeholder="xxxxxxxx xxxxxxxx …"></textarea>
+        <div id="e2eeRestoreError" class="error"></div>
+        <button id="e2eeRestoreGo" class="primary">بازیابی</button>
+        <button id="e2eeRestoreCancel" class="ghost">انصراف</button>
+      </div>
+    </div>
+  </div>
+
   <!-- لایه تماس (گام ۶) -->
   <div id="callOverlay" class="call-overlay hidden">
     <video id="callRemoteVideo" class="call-remote-video hidden" autoplay playsinline></video>
@@ -149,6 +186,7 @@
 
   <script src="vendor/socket.io.min.js"></script>
   <script src="vendor/livekit-client.min.js"></script>
+  <script src="vendor/e2ee.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

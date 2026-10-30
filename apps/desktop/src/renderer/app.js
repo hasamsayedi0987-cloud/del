@@ -218,6 +218,7 @@ $('verify').onclick = async () => {
     });
     store.set('refreshToken', session.refreshToken);
     connectWs(session.accessToken);
+    void e2eeInit(session.accessToken, session.user.id); // گام ۸
     enterChats();
   } catch (e) {
     $('otpError').textContent = faError(e);
@@ -249,8 +250,11 @@ function connectWs(token) {
       const maxSeq = realSeqs.length ? Math.max(...realSeqs) : 0;
       if (maxSeq > 0) {
         void apiCall(`/conversations/${currentConv.id}/messages?since=${maxSeq}`, { token: session.accessToken })
-          .then((page) => {
-            (page.messages ?? []).forEach(upsertMessage);
+          .then(async (page) => {
+            for (const m of page.messages ?? []) {
+              if (e2eeIsEcho(m)) continue;
+              upsertMessage(await e2eeTryDecrypt(session.accessToken, m));
+            }
           })
           .catch(() => {});
       }
@@ -263,7 +267,15 @@ function connectWs(token) {
   });
   socket.on('message.new', ({ conversationId, message }) => {
     if (currentConv && conversationId === currentConv.id) {
-      upsertMessage(message);
+      void (async () => {
+        // گام ۸: echo خودِ این دستگاه متن موضعی را حفظ می‌کند؛ پیام رمز باز می‌شود
+        if (e2eeIsEcho(message)) {
+          const known = localMessages.find((x) => x.clientMsgId === message.clientMsgId);
+          upsertMessage({ ...message, body: known?.body ?? message.body });
+        } else {
+          upsertMessage(await e2eeTryDecrypt(session.accessToken, message));
+        }
+      })();
       void apiCall(`/conversations/${conversationId}/read`, {
         method: 'POST', token: session.accessToken, body: { lastReadSeq: message.serverSeq },
       }).catch(() => {});
@@ -271,7 +283,7 @@ function connectWs(token) {
       // گام ۷: پنجره فوکوس ندارد → اعلان بومی
       notifyDesktop({
         title: convDisplayName(chatListCache.find((c) => c.id === conversationId)),
-        body: message.body?.trim() ? message.body : 'پیام رسانه‌ای',
+        body: message.isE2ee ? '🔒 پیام رمزنگاری‌شده' : (message.body?.trim() ? message.body : 'پیام رسانه‌ای'),
         conversationId,
         kind: 'message',
       });
@@ -394,13 +406,14 @@ async function renderChatList() {
           <div class="chat-preview"></div>
         </div>
         ${c.unreadCount > 0 ? `<div class="badge">${faDigits(c.unreadCount)}</div>` : ''}`;
-      row.querySelector('.chat-name').textContent = name;
+      row.querySelector('.chat-name').textContent = (!isGroup && e2eeIdentity ? '🔒 ' : '') + name;
       row.querySelector('.chat-preview').textContent = isGroup
         ? `${faDigits(c.memberCount ?? 0)} عضو${c.lastMessage ? ` · ${c.lastMessage.body}` : ''}`
         : c.lastMessage?.body ?? 'بدون پیام';
       row.onclick = () => openChat(c);
       listEl.appendChild(row);
     }
+    updateE2eeBanner();
   } catch (e) {
     listEl.innerHTML = `<p class="error">${faError(e)}</p>`;
   }
@@ -467,6 +480,8 @@ $('newGroupCreate').onclick = async () => {
 };
 
 // ————— چت —————
+let e2eeActiveConv = false; // گام ۸: گفتگوی فعلی رمزنگاری‌شده است؟
+
 async function openChat(conv) {
   currentConv = conv;
   localMessages = [];
@@ -477,9 +492,11 @@ async function openChat(conv) {
   typingUserName = null;
   currentPeerId = conv.peer?.userId ?? null;
   peerLastPresence = null;
-  $('chatTitle').textContent = isGroupChat
+  e2eeActiveConv = false;
+  const baseName = isGroupChat
     ? conv.title ?? 'گروه'
     : conv.peer?.displayName ?? conv.peer?.phone ?? 'گفتگو';
+  $('chatTitle').textContent = baseName;
   $('chatStatus').innerHTML = '&nbsp;';
   $('msgList').innerHTML = '';
   $('msgInput').value = '';
@@ -490,6 +507,16 @@ async function openChat(conv) {
   $('callAudio').classList.toggle('hidden', !direct);
   $('callVideo').classList.toggle('hidden', !direct);
   if (isGroupChat) void refreshGroupDetail();
+  // گام ۸: اگر هر دو طرف هویت دارند ← این گفتگو رمز می‌شود
+  if (direct && currentPeerId && e2eeReadyLocal()) {
+    void e2eePeerSupports(session.accessToken, currentPeerId).then((ok) => {
+      e2eeActiveConv = ok;
+      if (ok) {
+        $('chatTitle').textContent = `🔒 ${baseName}`;
+        void e2eeTopUp(session.accessToken);
+      }
+    });
+  }
   await loadHistory();
   // عضویت در اتاق — برای مکالمه‌های ساخته‌شده پس از اتصال socket
   socket?.emit('conversation.join', { conversationId: conv.id });
@@ -502,7 +529,10 @@ async function loadHistory(before) {
       `/conversations/${currentConv.id}/messages${before ? `?before=${before}` : ''}`,
       { token: session.accessToken },
     );
-    localMessages = before ? [...page.messages, ...localMessages] : page.messages;
+    // گام ۸: پیام‌های رمز به ترتیب صعودی باز می‌شوند
+    const decrypted = [];
+    for (const m of page.messages) decrypted.push(await e2eeTryDecrypt(session.accessToken, m));
+    localMessages = before ? [...decrypted, ...localMessages] : decrypted;
     $('loadOlder').classList.toggle('hidden', !page.hasMore);
     renderMessages();
     const latest = page.messages[page.messages.length - 1];
@@ -614,6 +644,36 @@ function sendMessage() {
   if (!body || !currentConv) return;
   const clientMsgId = uuid();
   $('msgInput').value = '';
+
+  // گام ۸: گفتگوی خصوصی با هویت هر دو طرف ← پاکت multi-device
+  if (!isGroupChat && e2eeActiveConv && currentPeerId) {
+    void (async () => {
+      try {
+        const envelope = await e2eeEncryptDirect(session.accessToken, currentConv.id, currentPeerId, body);
+        const sendRest = async () => {
+          const r = await apiCall(`/conversations/${currentConv.id}/messages`, {
+            method: 'POST', token: session.accessToken, body: { clientMsgId, body: envelope, isE2ee: true },
+          });
+          upsertMessage({ ...r.message, body });
+        };
+        if (socket?.connected) {
+          socket.timeout(15000).emit(
+            'message.send',
+            { conversationId: currentConv.id, clientMsgId, body: envelope, isE2ee: true },
+            (err, ack) => {
+              if (!err && ack?.ok && ack.message) upsertMessage({ ...ack.message, body });
+              else void sendRest();
+            },
+          );
+        } else {
+          void sendRest();
+        }
+      } catch {
+        alert('رمزگذاری پیام ناموفق بود — دوباره تلاش کنید.');
+      }
+    })();
+    return;
+  }
 
   const fallbackRest = async () => {
     try {
@@ -959,8 +1019,16 @@ $('goProfile').onclick = () => {
   $('meName').textContent = session.user.displayName ?? '—';
   $('meId').textContent = session.user.id.slice(0, 8) + '…';
   $('displayName').value = session.user.displayName ?? '';
+  // گام ۸: وضعیت رمزنگاری + کلید بازیابی
+  const active = e2eeReadyLocal();
+  $('e2eeStatus').textContent = active ? '🔒 فعال (X3DH + Double Ratchet)' : 'غیرفعال';
+  $('showRecovery').classList.toggle('hidden', !e2eeStoreLocal.recovery());
   show('profile');
   void checkHealth();
+};
+$('showRecovery').onclick = () => {
+  const key = e2eeStoreLocal.recovery();
+  if (key) alert(`کلید بازیابی شما:\n\n${key}\n\nآن را جایی امن نگه دارید.`);
 };
 $('profileBack').onclick = () => show('chats');
 
@@ -1006,6 +1074,275 @@ $('logout').onclick = async () => {
   show('phone');
 };
 
+// ————— گام ۸: رمزنگاری سرتاسری — موتور روی window.DelE2ee —————
+
+const E2 = () => window.DelE2ee;
+const e2eeRng = (n) => {
+  const b = new Uint8Array(n);
+  crypto.getRandomValues(b);
+  return b;
+};
+
+// ————— ذخیره‌سازی localStorage —————
+const e2eeStoreLocal = {
+  identity: () => { try { return JSON.parse(store.get('e2ee.identity') ?? 'null'); } catch { return null; } },
+  setIdentity: (id) => store.set('e2ee.identity', JSON.stringify(id)),
+  recovery: () => store.get('e2ee.recovery'),
+  setRecovery: (k) => store.set('e2ee.recovery', k),
+  otks: () => { try { return JSON.parse(store.get('e2ee.otks') ?? '{"privs":{},"nextKeyId":1}'); } catch { return { privs: {}, nextKeyId: 1 }; } },
+  setOtks: (o) => store.set('e2ee.otks', JSON.stringify(o)),
+  consumeOtkPriv: (keyId) => {
+    const o = e2eeStoreLocal.otks();
+    const priv = o.privs[String(keyId)] ?? null;
+    if (priv) { delete o.privs[String(keyId)]; e2eeStoreLocal.setOtks(o); }
+    return priv;
+  },
+  sessions: (peerUserId) => { try { return JSON.parse(store.get(`e2ee.s.${peerUserId}`) ?? '{}'); } catch { return {}; } },
+  saveSession: (peerUserId, st) => {
+    const all = e2eeStoreLocal.sessions(peerUserId);
+    all[st.peerDeviceId] = st;
+    store.set(`e2ee.s.${peerUserId}`, JSON.stringify(all));
+  },
+};
+
+// ————— وضعیت —————
+let e2eeIdentity = null;
+let e2eeDeviceId = null;
+
+function e2eeReadyLocal() {
+  return Boolean(e2eeIdentity && e2eeDeviceId && E2());
+}
+
+/** پس از ورود: شناسه دستگاه + هویت محلی */
+async function e2eeInit(token, userId) {
+  if (!E2()) return;
+  E2().setRng(e2eeRng);
+  try {
+    const me = await apiCall('/auth/me', { token });
+    e2eeDeviceId = me.deviceId ?? null;
+  } catch { e2eeDeviceId = null; }
+  e2eeIdentity = e2eeStoreLocal.identity();
+  void userId;
+  updateE2eeBanner();
+}
+
+function updateE2eeBanner() {
+  const banner = $('e2eeBanner');
+  if (!banner) return;
+  banner.classList.toggle('hidden', Boolean(e2eeIdentity ?? e2eeStoreLocal.identity()));
+}
+
+/** آپلود هویت + دسته اولیه OTK */
+async function e2eePublish(token) {
+  if (!e2eeIdentity) throw new Error('E2EE_NO_IDENTITY');
+  const batch = e2eeMakeOtks(40);
+  await apiCall('/e2ee/identity', {
+    method: 'POST',
+    token,
+    body: {
+      ikEd: e2eeIdentity.ikEd.pub,
+      ikX: e2eeIdentity.ikX.pub,
+      spkKeyId: e2eeIdentity.spk.keyId,
+      spk: e2eeIdentity.spk.pub,
+      spkSig: e2eeIdentity.spk.sig,
+      otks: batch.map((o) => ({ keyId: o.keyId, key: o.pub })),
+    },
+  });
+}
+
+function e2eeMakeOtks(count) {
+  const st = e2eeStoreLocal.otks();
+  const batch = E2().makeOtkBatch(e2eeRng, count, st.nextKeyId);
+  for (const o of batch) st.privs[String(o.keyId)] = o.priv;
+  st.nextKeyId += count;
+  e2eeStoreLocal.setOtks(st);
+  return batch;
+}
+
+/** پر کردن مجدد OTK اگر کم شده */
+async function e2eeTopUp(token) {
+  if (!e2eeReadyLocal()) return;
+  try {
+    const devices = await apiCall(`/e2ee/devices/${session.user.id}`, { token });
+    const mine = devices.find((d) => d.deviceId === e2eeDeviceId);
+    if (mine && mine.otkCount < 10) {
+      const batch = e2eeMakeOtks(40);
+      await apiCall('/e2ee/otks', { method: 'POST', token, body: { otks: batch.map((o) => ({ keyId: o.keyId, key: o.pub })) } });
+    }
+  } catch { /* بی‌اهمیت */ }
+}
+
+async function e2eePeerSupports(token, peerUserId) {
+  try {
+    const devices = await apiCall(`/e2ee/devices/${peerUserId}`, { token });
+    return devices.length > 0;
+  } catch { return false; }
+}
+
+/** راه‌اندازی تازه — کلید بازیابی برمی‌گردد */
+async function e2eeSetupNew(token) {
+  e2eeIdentity = E2().generateIdentity(e2eeRng);
+  e2eeStoreLocal.setIdentity(e2eeIdentity);
+  await e2eePublish(token);
+  const recoveryKey = E2().generateRecoveryKey();
+  const backup = E2().createBackup(e2eeIdentity, E2().parseRecoveryKey(recoveryKey));
+  await apiCall('/e2ee/backup', { method: 'PUT', token, body: backup });
+  e2eeStoreLocal.setRecovery(recoveryKey);
+  return recoveryKey;
+}
+
+/** بازیابی هویت با کلید بازیابی */
+async function e2eeRestore(token, recoveryDisplay) {
+  const backup = await apiCall('/e2ee/backup', { token });
+  const restored = E2().restoreBackup(backup.blob, backup.salt, E2().parseRecoveryKey(recoveryDisplay));
+  e2eeIdentity = E2().identityFromPrivate(restored.ikEdPriv, restored.ikXPriv, e2eeRng);
+  e2eeStoreLocal.setIdentity(e2eeIdentity);
+  await e2eePublish(token);
+  const blob = E2().createBackup(e2eeIdentity, E2().parseRecoveryKey(recoveryDisplay));
+  await apiCall('/e2ee/backup', { method: 'PUT', token, body: blob });
+  e2eeStoreLocal.setRecovery(recoveryDisplay.trim());
+}
+
+// ————— رمز کردن / باز کردن —————
+
+async function e2eeEncryptTo(token, conversationId, peerUserId, bundle, plaintext) {
+  const sessions = e2eeStoreLocal.sessions(peerUserId);
+  const saved = sessions[bundle.deviceId];
+  const sessionObj = saved ? E2().DelSession.load(saved) : E2().DelSession.initiate(e2eeIdentity, peerUserId, bundle, e2eeRng);
+  const ad = E2().DelSession.ad(conversationId, e2eeDeviceId, bundle.deviceId);
+  const entry = sessionObj.encrypt(plaintext, ad);
+  e2eeStoreLocal.saveSession(peerUserId, sessionObj.serialize());
+  return { deviceId: bundle.deviceId, from: e2eeDeviceId, ...(entry.pm ? { pm: entry.pm } : {}), ct: entry.ct };
+}
+
+async function e2eeEncryptDirect(token, conversationId, peerUserId, plaintext) {
+  if (!e2eeReadyLocal()) throw new Error('E2EE_NOT_READY');
+  const [peerBundles, myDevices] = await Promise.all([
+    apiCall(`/e2ee/bundle/${peerUserId}`, { token }),
+    apiCall(`/e2ee/devices/${session.user.id}`, { token }),
+  ]);
+  const entries = [];
+  for (const b of peerBundles.bundles ?? []) {
+    entries.push(await e2eeEncryptTo(token, conversationId, peerUserId, b, plaintext));
+  }
+  for (const dev of myDevices) {
+    if (dev.deviceId === e2eeDeviceId) continue;
+    entries.push(await e2eeEncryptTo(token, conversationId, session.user.id, {
+      deviceId: dev.deviceId, ikEd: dev.ikEd, ikX: dev.ikX,
+      spkKeyId: dev.spkKeyId, spk: dev.spk, spkSig: dev.spkSig, otk: null,
+    }, plaintext));
+  }
+  if (!entries.length) throw new Error('E2EE_NO_RECIPIENTS');
+  return JSON.stringify(E2().buildEnvelope(entries, e2eeDeviceId));
+}
+
+/** خروجی: { ok, text } — ok=false یعنی این دستگاه گیرنده نبود یا session نیست */
+async function e2eeDecryptDirect(token, conversationId, senderId, body) {
+  if (!e2eeReadyLocal()) return { ok: false };
+  const envelope = E2().isE2eeEnvelope(body);
+  if (!envelope) return { ok: false };
+  const entry = (envelope.to ?? []).find((e) => e.deviceId === e2eeDeviceId);
+  if (!entry) return { ok: false };
+  const ad = E2().DelSession.ad(conversationId, entry.from, e2eeDeviceId);
+  const sessions = e2eeStoreLocal.sessions(senderId);
+  const saved = sessions[entry.from];
+  if (saved) {
+    try {
+      const sessionObj = E2().DelSession.load(saved);
+      const text = sessionObj.decrypt({ ct: entry.ct }, ad);
+      e2eeStoreLocal.saveSession(senderId, sessionObj.serialize());
+      return { ok: true, text };
+    } catch { /* ادامه با pm */ }
+  }
+  if (entry.pm) {
+    try {
+      const otkPriv = entry.pm.otkKeyId != null ? e2eeStoreLocal.consumeOtkPriv(entry.pm.otkKeyId) : null;
+      const sessionObj = E2().DelSession.accept(e2eeIdentity, senderId, entry.from, entry.pm, otkPriv ? E2().fromB64(otkPriv) : null);
+      const text = sessionObj.decrypt({ ct: entry.ct }, ad);
+      e2eeStoreLocal.saveSession(senderId, sessionObj.serialize());
+      void e2eeTopUp(token);
+      return { ok: true, text };
+    } catch { return { ok: false }; }
+  }
+  return { ok: false };
+}
+
+/** پیام E2EE → متن یا placeholder */
+async function e2eeTryDecrypt(token, m) {
+  if (!m.isE2ee) return m;
+  try {
+    const r = await e2eeDecryptDirect(token, m.conversationId, m.senderId, m.body);
+    if (r.ok) return { ...m, body: r.text };
+  } catch { /* پایین‌تر */ }
+  return {
+    ...m,
+    body: m.senderId === session.user.id
+      ? '🔒 پیام شما از دستگاه دیگر — در این دستگاه باز نمی‌شود'
+      : '🔒 پیام رمزنگاری‌شده — در این دستگاه باز نمی‌شود',
+  };
+}
+
+/** آیا این پیام خودِ این دستگاه بوده؟ (echo) */
+function e2eeIsEcho(m) {
+  return localMessages.some((x) => x.clientMsgId === m.clientMsgId);
+}
+
+// ————— مودال E2EE —————
+function e2eeOpenModal(step) {
+  $('e2eeStepChoose').classList.toggle('hidden', step !== 'choose');
+  $('e2eeStepShowKey').classList.toggle('hidden', step !== 'show-key');
+  $('e2eeStepRestore').classList.toggle('hidden', step !== 'restore');
+  $('e2eeModal').classList.remove('hidden');
+}
+$('e2eeBanner').onclick = async () => {
+  $('e2eeChooseError').textContent = '';
+  try {
+    await apiCall('/e2ee/backup', { token: session.accessToken });
+    $('e2eeRestoreStep').classList.remove('hidden');
+  } catch {
+    $('e2eeRestoreStep').classList.add('hidden');
+  }
+  e2eeOpenModal('choose');
+};
+$('e2eeClose').onclick = () => $('e2eeModal').classList.add('hidden');
+$('e2eeNew').onclick = async () => {
+  const btn = $('e2eeNew');
+  btn.disabled = true; btn.textContent = 'در حال ساخت کلیدها…';
+  $('e2eeChooseError').textContent = '';
+  try {
+    const key = await e2eeSetupNew(session.accessToken);
+    $('e2eeRecoveryKey').textContent = key;
+    e2eeOpenModal('show-key');
+    updateE2eeBanner();
+  } catch (e) {
+    $('e2eeChooseError').textContent = faError(e);
+  } finally {
+    btn.disabled = false; btn.textContent = 'راه‌اندازی تازه — کلید بازیابی جدید';
+  }
+};
+$('e2eeSaved').onclick = () => {
+  $('e2eeModal').classList.add('hidden');
+  alert('رمزنگاری سرتاسری فعال شد — پیام‌های خصوصی از این پس رمز می‌شوند.');
+};
+$('e2eeRestoreStep').onclick = () => e2eeOpenModal('restore');
+$('e2eeRestoreCancel').onclick = () => $('e2eeModal').classList.add('hidden');
+$('e2eeRestoreGo').onclick = async () => {
+  const btn = $('e2eeRestoreGo');
+  btn.disabled = true; btn.textContent = 'در حال بازیابی…';
+  $('e2eeRestoreError').textContent = '';
+  try {
+    await e2eeRestore(session.accessToken, $('e2eeRecoveryInput').value);
+    $('e2eeModal').classList.add('hidden');
+    alert('هویت رمزنگاری بازگردانده شد — پیام‌های جدید رمزنگاری می‌شوند.');
+    updateE2eeBanner();
+  } catch (e) {
+    $('e2eeRestoreError').textContent =
+      e.code === 'E2EE_BACKUP_MISSING' ? 'پشتیبانی روی سرور نیست — راه‌اندازی تازه را انتخاب کنید' : 'کلید بازیابی اشتباه است';
+  } finally {
+    btn.disabled = false; btn.textContent = 'بازیابی';
+  }
+};
+
 // ————— بوت: بازیابی نشست با refresh token —————
 (async () => {
   const rt = store.get('refreshToken');
@@ -1014,6 +1351,7 @@ $('logout').onclick = async () => {
     session = await apiCall('/auth/refresh', { method: 'POST', body: { refreshToken: rt } });
     store.set('refreshToken', session.refreshToken);
     connectWs(session.accessToken);
+    void e2eeInit(session.accessToken, session.user.id); // گام ۸
     enterChats();
   } catch {
     store.del('refreshToken');

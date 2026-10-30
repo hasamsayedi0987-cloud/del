@@ -6,6 +6,10 @@ import type {
   CallPage,
   ConversationDto,
   DeviceDto,
+  E2eeBackup,
+  E2eeBundle,
+  E2eeDeviceKeys,
+  E2eeStatus,
   MediaAssetDto,
   MediaUrlResponse,
   MessageDto,
@@ -141,6 +145,7 @@ export const api = {
     clientMsgId: string,
     body?: string,
     mediaId?: string,
+    isE2ee?: boolean,
   ) =>
     request<{ message: MessageDto; duplicate: boolean }>(
       `/conversations/${conversationId}/messages`,
@@ -151,6 +156,7 @@ export const api = {
           clientMsgId,
           ...(body !== undefined ? { body } : {}),
           ...(mediaId ? { mediaId } : {}),
+          ...(isE2ee ? { isE2ee: true } : {}),
         }),
       },
     ),
@@ -184,6 +190,56 @@ export const api = {
   /** همگام‌سازی افزایشی — فقط مکالمه‌های تغییریافته پس از cursor */
   syncUpdates: (token: string, since: string) =>
     request<SyncUpdates>(`/sync/updates?since=${encodeURIComponent(since)}`, { token }),
+
+  // ————— رمزنگاری سرتاسری (گام ۸) —————
+
+  /** شناسه دستگاه این نشست (از JWT) — برای آدرس‌دهی پاکت E2EE */
+  authMe: (token: string) =>
+    request<{ userId: string; deviceId: string | null }>('/auth/me', { token }),
+
+  e2eeStatus: (token: string) => request<E2eeStatus>('/e2ee/status', { token }),
+
+  e2eeUploadIdentity: (
+    token: string,
+    payload: {
+      ikEd: string;
+      ikX: string;
+      spkKeyId: number;
+      spk: string;
+      spkSig: string;
+      otks?: { keyId: number; key: string }[];
+    },
+  ) =>
+    request<{ ok: true }>('/e2ee/identity', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(payload),
+    }),
+
+  e2eeAddOtks: (token: string, otks: { keyId: number; key: string }[]) =>
+    request<{ ok: true }>('/e2ee/otks', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ otks }),
+    }),
+
+  e2eeDeviceKeys: (token: string, userId: string) =>
+    request<E2eeDeviceKeys[]>(`/e2ee/devices/${userId}`, { token }),
+
+  e2eeFetchBundles: (token: string, userId: string) =>
+    request<{ userId: string; bundles: E2eeBundle[] }>(`/e2ee/bundle/${userId}`, { token }),
+
+  e2eeSaveBackup: (token: string, blob: string, salt: string) =>
+    request<{ ok: true }>('/e2ee/backup', {
+      method: 'PUT',
+      token,
+      body: JSON.stringify({ blob, salt }),
+    }),
+
+  e2eeGetBackup: (token: string) => request<E2eeBackup>('/e2ee/backup', { token }),
+
+  e2eeDeleteIdentity: (token: string) =>
+    request<void>('/e2ee/identity', { method: 'DELETE', token }),
 
   // ————— حضور (گام ۳) —————
 

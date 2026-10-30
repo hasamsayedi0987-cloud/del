@@ -1,6 +1,6 @@
 {
   "name": "@del/desktop",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Del Desktop — Windows / macOS / Linux",
   "main": "src/main.js",
@@ -9,7 +9,9 @@
     "build": "electron-builder --publish never",
     "build:dir": "electron-builder --dir --publish never",
     "lint": "node --check src/main.js && echo lint-ok",
-    "typecheck": "echo typecheck-ok plain-js"
+    "typecheck": "echo typecheck-ok plain-js",
+    "prebuild": "node scripts/sync-e2ee.js",
+    "predev": "node scripts/sync-e2ee.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
