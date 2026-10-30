@@ -96,6 +96,11 @@ async function main() {
   check('آمار کاربر (conversations/messages/devices) موجود', typeof withStats.stats?.messages === 'number');
 
   // ۴) گزارش سوءاستفاده — صف ادمین
+  // خط پایه متریک‌ها — دادهٔ نیمه‌کارهٔ اجرای قبلی (مثلاً پس از کرش) نباید این اجرا را قرمز کند
+  const metBase = await api('GET', '/admin/metrics', { token: admin.accessToken });
+  const openReportsBase = metBase.data?.reports?.open ?? 0;
+  const blockedBase = metBase.data?.users?.blocked ?? 0;
+
   const rep1 = await api('POST', `/users/${B.user.id}/report`, {
     token: A.accessToken,
     body: { reason: 'spam', note: 'تبلیغ مزاحم' },
@@ -217,8 +222,8 @@ async function main() {
     typeof met.data.reports?.open === 'number' &&
     typeof met.data.onlineNow === 'number',
     JSON.stringify(met.data).slice(0, 160));
-  check('متریک: blocked هم‌اکنون ۰ است (C رفع مسدود شد)', met.data.users?.blocked === 0, `blocked=${met.data.users?.blocked}`);
-  check('متریک: open reports = ۰ (همه رسیدگی شد)', met.data.reports?.open === 0, `open=${met.data.reports?.open}`);
+  check('متریک: blocked به خط پایه برگشت (C رفع مسدود شد)', met.data.users?.blocked === blockedBase, `blocked=${met.data.users?.blocked} base=${blockedBase}`);
+  check('متریک: open reports به خط پایه برگشت (همه رسیدگی شد)', met.data.reports?.open === openReportsBase, `open=${met.data.reports?.open} base=${openReportsBase}`);
 
   const audit = await api('GET', '/admin/audit?limit=100', { token: admin.accessToken });
   const actions = audit.data?.items?.map((a) => a.action) ?? [];

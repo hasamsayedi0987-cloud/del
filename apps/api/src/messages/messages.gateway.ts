@@ -84,6 +84,13 @@ export class MessagesGateway
       return;
     }
 
+    // اتاق شخصی بلافاصله و پیش از هر await به عضویت درمی‌آید — چون socket.io
+    // connect_ack را پیش از کامل شدن handleConnection به کلاینت می‌فرستد؛ اگر
+    // عضویت بعد از کوئری‌های prisma انجام شود، ادمین می‌تواند در همین پنجرهٔ
+    // کوتاه event اتاقی را برای اتاق خالی بفرستد (مثلاً account.blocked) و
+    // رویداد هرگز به کلاینت نرسد.
+    client.join(userRoom(client.data.userId));
+
     // حساب مسدودشده (گام ۱۰) — اتصال بلافاصله بسته می‌شود
     const u = await this.prisma.user.findUnique({
       where: { id: client.data.userId },
@@ -98,13 +105,12 @@ export class MessagesGateway
       return;
     }
 
-    // عضویت در اتاق همه مکالمه‌های کاربر + اتاق شخصی (برای رویداد conversation.new)
+    // عضویت در اتاق همه مکالمه‌های کاربر (اتاق شخصی بالاتر انجام شد)
     const parts = await this.prisma.participant.findMany({
       where: { userId: client.data.userId },
       select: { conversationId: true },
     });
     for (const p of parts) client.join(room(p.conversationId));
-    client.join(userRoom(client.data.userId));
 
     // حضور: اگر اولین socket این کاربر است → online + اطلاع به هم‌مکالمه‌ها
     const sockets = this.socketsByUser.get(client.data.userId) ?? new Set<string>();
@@ -435,9 +441,13 @@ export class MessagesGateway
         code: 'ACCOUNT_BLOCKED',
         message: 'This account has been blocked',
       } satisfies WsAccountBlocked);
-      // قطع فوری همه socketهای کاربر در اتاق شخصی‌اش
-      void this.server?.in(userRoom(p.userId)).disconnectSockets(true);
-      this.logger.warn(`WS kicked all sockets of blocked user=${p.userId}`);
+      // قطع با تاخیر کوتاه (۲۰۰ms) — emit و disconnectSockets هر دو عملیات broadcast
+      // async هستند و اگر پشت‌سرهم صدا زده شوند، ممکن است قطع اتصال زودتر از ارسال
+      // بستهٔ رویداد اجرا شود و کلاینت هرگز account.blocked را نبیند.
+      setTimeout(() => {
+        void this.server?.in(userRoom(p.userId)).disconnectSockets(true);
+      }, 200);
+      this.logger.warn(`WS kicked all sockets of blocked user=${p.userId} (grace 200ms)`);
     };
     this.events.on('admin.user.blocked', this.onAdminBlocked);
   }
