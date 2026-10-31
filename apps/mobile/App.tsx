@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar, View, Text, StyleSheet, ActivityIndicator, Alert, AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from './src/api';
+import { loadApiBaseUrl } from './src/config';
 import { connectSocket, disconnectSocket, getSocket } from './src/socket';
 import { theme } from './src/theme';
 import { setupCallGlobals } from './src/lk';
@@ -82,6 +83,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        await loadApiBaseUrl(); // گام ۱۱: آدرس سرور ذخیره‌شده — قبل از هر درخواست
         const [a, r, userJson] = await Promise.all([
           SecureStore.getItemAsync(KEYS.access),
           SecureStore.getItemAsync(KEYS.refresh),

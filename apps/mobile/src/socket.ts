@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { API_BASE_URL } from './config';
+import { getApiBaseUrl } from './config';
 
 /**
  * مدیریت اتصال Socket.IO — یک نمونه مشترک برای کل اپ
@@ -29,7 +29,7 @@ export function connectSocket(token: string): Socket {
   socket?.disconnect();
   stopHeartbeat();
   currentToken = token;
-  socket = io(API_BASE_URL, {
+  socket = io(getApiBaseUrl(), {
     auth: { token },
     transports: ['websocket'],
     reconnection: true,

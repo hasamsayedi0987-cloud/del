@@ -3,7 +3,7 @@
  * آپلود مستقیم به S3 با Presigned URL (single یا multipart) — بایت‌ها از API عبور نمی‌کنند.
  * + کش URL امضاشده دانلود برای نمایش تصاویر.
  */
-import { API_BASE_URL } from './config';
+import { getApiBaseUrl } from './config';
 import { api } from './api';
 import type { MediaAssetDto, PresignResponse } from '@del/shared-types';
 
@@ -93,4 +93,6 @@ export function invalidateUrl(mediaId: string): void {
 }
 
 /** PUT خالی برای تست اتصال S3 (بدون استفاده در UI) */
-export const MEDIA_API = `${API_BASE_URL}/api/v1/media`;
+export function MEDIA_API(): string {
+  return `${getApiBaseUrl()}/api/v1/media`;
+}

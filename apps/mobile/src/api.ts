@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './config';
+import { getApiBaseUrl } from './config';
 import type {
   AiStatus,
   AiTextResult,
@@ -48,7 +48,7 @@ async function request<T>(path: string, init?: RequestInit & { token?: string })
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}/api/v1${path}`, { ...init, headers });
+    res = await fetch(`${getApiBaseUrl()}/api/v1${path}`, { ...init, headers });
   } catch {
     throw new ApiError(0, 'NETWORK', 'سرور در دسترس نیست. اتصال اینترنت و آدرس API را بررسی کنید.');
   }
