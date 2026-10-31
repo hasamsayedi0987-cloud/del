@@ -93,14 +93,56 @@ export class AuthService {
       }),
     ]);
 
+    const smsSent = cfg.smsConfigured ? await this.sendOtpSms(phone, code) : false;
+    if (smsSent) {
+      return { expiresInSeconds: cfg.otpTtlSec, smsSent: true };
+    }
+
     if (cfg.authDevMode) {
       this.logger.log(`[DEV MODE] OTP for ${phone}: ${code}`);
       return { devCode: code, expiresInSeconds: cfg.otpTtlSec };
     }
 
-    // TODO(Step 2): اتصال به سرویس SMS (Kavenegar/SMS.ir) — docs/02-architecture.md
-    this.logger.log(`OTP generated for ${phone} — SMS provider not configured yet`);
+    // پیامک پیکربندی نشده و حالت توسعه خاموش است — کد فقط در لاگ سرور می‌آید
+    this.logger.log(`OTP generated for ${phone} — SMS provider not configured`);
     return { expiresInSeconds: cfg.otpTtlSec };
+  }
+
+  /**
+   * ارسال کد ورود با کاوه‌نگار — گام ۱۱.
+   *  • اگر KAVENEGAR_OTP_TEMPLATE تنظیم شده باشد از verify/lookup (قالب تأییدشده پنل) استفاده می‌شود
+   *  • وگرنه از sms/send با متن ساده
+   * خطاها هرگز به کلاینت نشت نمی‌کنند — فقط false برمی‌گردد.
+   */
+  private async sendOtpSms(phone: string, code: string): Promise<boolean> {
+    const cfg = this.cfg();
+    const key = cfg.smsApiKey as string;
+    const receptor = phone.replace(/^\+/, ''); // ‎+98912…‎ → 98912… (قالب کاوه‌نگار)
+    const url = cfg.smsOtpTemplate
+      ? `https://api.kavenegar.com/v1/${key}/verify/lookup.json` +
+        `?receptor=${encodeURIComponent(receptor)}` +
+        `&token=${encodeURIComponent(code)}` +
+        `&template=${encodeURIComponent(cfg.smsOtpTemplate)}`
+      : `https://api.kavenegar.com/v1/${key}/sms/send.json` +
+        `?receptor=${encodeURIComponent(receptor)}` +
+        `&message=${encodeURIComponent(`کد ورود دل: ${code}`)}` +
+        (cfg.smsSender ? `&sender=${encodeURIComponent(cfg.smsSender)}` : '');
+    try {
+      const res = await fetch(url, { method: 'GET' });
+      const body = (await res.json().catch(() => null)) as
+        | { return?: { status?: number; message?: string } }
+        | null;
+      const ok = res.ok && body?.return?.status === 200;
+      if (!ok) {
+        this.logger.warn(
+          `Kavenegar send failed for ${phone}: http=${res.status} return=${body?.return?.status ?? 'n/a'} ${body?.return?.message ?? ''}`,
+        );
+      }
+      return ok;
+    } catch (e) {
+      this.logger.warn(`Kavenegar error for ${phone}: ${String(e)}`);
+      return false;
+    }
   }
 
   /** گام ۲ ورود: بررسی کد، ساخت/به‌روزرسانی کاربر و صدور توکن‌ها */

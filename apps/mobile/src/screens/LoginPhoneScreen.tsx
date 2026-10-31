@@ -1,30 +1,46 @@
 import React, { useState } from 'react';
 import { Text, View, StyleSheet } from 'react-native';
 import { api, ApiError } from '../api';
-import { getApiBaseUrl, saveApiBaseUrl } from '../config';
+import { getApiBaseUrl, saveApiBaseUrl, DEFAULT_SERVER_URL } from '../config';
 import { theme } from '../theme';
 import { Button, Input, Logo, Screen, Subtitle, Title } from '../components/ui';
 
-export function LoginPhoneScreen({ onCodeSent }: { onCodeSent: (phone: string) => void }) {
-  const [server, setServer] = useState(getApiBaseUrl());
+export function LoginPhoneScreen({
+  onCodeSent,
+}: {
+  onCodeSent: (phone: string, devCode?: string) => void;
+}) {
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [server, setServer] = useState(getApiBaseUrl());
 
   const submit = async () => {
     setError(null);
+    const digits = phone.trim();
+    if (digits.length < 10) {
+      setError('شماره موبایل را کامل وارد کنید');
+      return;
+    }
     const srv = server.trim();
-    if (!/^https?:\/\/.+/i.test(srv)) {
+    if (showAdvanced && srv && !/^https?:\/\/.+/i.test(srv)) {
       setError('آدرس سرور باید با http:// یا https:// شروع شود');
       return;
     }
     setBusy(true);
     try {
-      await saveApiBaseUrl(srv); // گام ۱۱: آدرس سرور ذخیره می‌شود و همه درخواست‌ها از آن استفاده می‌کنند
-      await api.requestOtp(phone.trim());
-      onCodeSent(phone.trim());
+      if (showAdvanced && srv) {
+        await saveApiBaseUrl(srv); // آدرس سرور ذخیره می‌شود و همه درخواست‌ها از آن استفاده می‌کنند
+      }
+      const res = await api.requestOtp(digits);
+      onCodeSent(digits, res.devCode);
     } catch (e) {
-      setError(e instanceof ApiError ? faError(e) : 'خطای غیرمنتظره');
+      if (e instanceof ApiError && e.code === 'NETWORK') {
+        setError('اتصال به سرور ممکن نشد — اگر سرور دل روی کامپیوتر خودتان است، آن را روشن کنید و در «تنظیمات پیشرفته» پایین صفحه آدرس درست را وارد کنید');
+      } else {
+        setError(e instanceof ApiError ? faError(e) : 'خطای غیرمنتظره');
+      }
     } finally {
       setBusy(false);
     }
@@ -36,20 +52,6 @@ export function LoginPhoneScreen({ onCodeSent }: { onCodeSent: (phone: string) =
       <Title>به دل خوش آمدید</Title>
       <Subtitle>برای ورود یا ثبت‌نام، شماره موبایل خود را وارد کنید</Subtitle>
 
-      <Text style={styles.fieldLabel}>آدرس سرور</Text>
-      <Input
-        value={server}
-        onChangeText={setServer}
-        placeholder="http://192.168.1.5:3000"
-        keyboardType="url"
-        autoCapitalize="none"
-        autoCorrect={false}
-        onSubmitEditing={submit}
-      />
-      <Text style={styles.fieldHint}>
-        آدرس سرور دل که روی کامپیوتر یا سرور خودتان اجرا کرده‌اید
-      </Text>
-
       <Input
         value={phone}
         onChangeText={setPhone}
@@ -57,6 +59,7 @@ export function LoginPhoneScreen({ onCodeSent }: { onCodeSent: (phone: string) =
         keyboardType="phone-pad"
         maxLength={24}
         onSubmitEditing={submit}
+        autoFocus
       />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -65,14 +68,34 @@ export function LoginPhoneScreen({ onCodeSent }: { onCodeSent: (phone: string) =
         label="دریافت کد ورود"
         onPress={submit}
         busy={busy}
-        disabled={phone.trim().length < 10 || !/^https?:\/\/.+/i.test(server.trim())}
+        disabled={phone.trim().length < 10}
       />
 
-      <View style={styles.devNote}>
-        <Text style={styles.devNoteText}>
-          کد OTP در پاسخ سرور برگردانده می‌شود (سرویس پیامک هنوز متصل نیست)
-        </Text>
-      </View>
+      {/* تنظیمات پیشرفته — برای سرور خودمیزبان؛ پیش‌فرض نیازی به آن نیست */}
+      <Text
+        style={styles.advancedToggle}
+        onPress={() => setShowAdvanced((v) => !v)}
+      >
+        {showAdvanced ? 'بستن تنظیمات پیشرفته ▴' : 'سرور شخصی دارید؟ تنظیمات پیشرفته ▾'}
+      </Text>
+
+      {showAdvanced ? (
+        <View style={styles.advancedBox}>
+          <Text style={styles.fieldLabel}>آدرس سرور دل</Text>
+          <Input
+            value={server}
+            onChangeText={setServer}
+            placeholder="http://192.168.1.5:3000"
+            keyboardType="url"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onSubmitEditing={submit}
+          />
+          <Text style={styles.fieldHint}>
+            پیش‌فرض: {DEFAULT_SERVER_URL} — با ذخیره‌شدن در همین صفحه برای دفعات بعد حفظ می‌شود
+          </Text>
+        </View>
+      ) : null}
     </Screen>
   );
 }
@@ -106,11 +129,20 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
   },
+  advancedToggle: {
+    color: theme.textDim,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 20,
+    textDecorationLine: 'underline',
+  },
+  advancedBox: {
+    marginTop: 8,
+  },
   fieldLabel: {
     color: theme.textDim,
     fontSize: 13,
     textAlign: 'right',
-    marginTop: 24,
     marginBottom: -10,
   },
   fieldHint: {
@@ -119,15 +151,5 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 8,
     lineHeight: 18,
-  },
-  devNote: {
-    marginTop: 'auto',
-    paddingTop: 32,
-  },
-  devNoteText: {
-    color: theme.textDim,
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 20,
   },
 });

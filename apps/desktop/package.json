@@ -13,10 +13,6 @@
     "prebuild": "node scripts/sync-e2ee.js",
     "predev": "node scripts/sync-e2ee.js"
   },
-  "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
-  },
   "build": {
     "appId": "ir.del.app",
     "productName": "Del",

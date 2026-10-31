@@ -33,6 +33,8 @@ export interface AuthSession extends AuthTokens {
 export interface RequestOtpResponse {
   /** فقط در حالت توسعه (AUTH_DEV_MODE=true) برگردانده می‌شود */
   devCode?: string;
+  /** true = کد با پیامک واقعی ارسال شد (سرویس SMS پیکربندی شده) */
+  smsSent?: boolean;
   expiresInSeconds: number;
 }
 

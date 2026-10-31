@@ -9,10 +9,12 @@ import type { AuthSession } from '@del/shared-types';
 
 export function LoginOtpScreen({
   phone,
+  devCode,
   onVerified,
   onBack,
 }: {
   phone: string;
+  devCode?: string;
   onVerified: (session: AuthSession) => void;
   onBack: () => void;
 }) {
@@ -37,7 +39,7 @@ export function LoginOtpScreen({
     <Screen>
       <Logo size={72} />
       <Title>کد تأیید</Title>
-      <Subtitle>کد ۶ رقمی برای {phone} ارسال شد</Subtitle>
+      <Subtitle>کد ۶ رقمی به شماره {phone} پیامک شد</Subtitle>
 
       <Input
         value={code}
@@ -47,6 +49,12 @@ export function LoginOtpScreen({
         maxLength={6}
         onSubmitEditing={submit}
       />
+
+      {devCode ? (
+        <Text style={styles.devCode}>
+          حالت توسعه (پیامک متصل نیست) — کد: {devCode}
+        </Text>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -62,5 +70,12 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 12,
     fontSize: 14,
+  },
+  devCode: {
+    color: theme.success ?? '#4ade80',
+    textAlign: 'center',
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: 'bold',
   },
 });

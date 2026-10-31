@@ -9,6 +9,16 @@ export interface AppConfig {
   refreshTokenTtl: number;
   /** حالت توسعه: کد OTP در پاسخ برگردانده می‌شود (بدون سرویس SMS) */
   authDevMode: boolean;
+  // ————— پیامک (گام ۱۱) — کاوه‌نگار —————
+  /** در صورت تنظیم KAVENEGAR_API_KEY کد ورود با پیامک واقعی ارسال می‌شود */
+  smsProvider: 'kavenegar' | undefined;
+  smsApiKey: string | undefined;
+  /** شماره فرستنده خط خدماتی (اختیاری — فقط برای sms/send) */
+  smsSender: string | undefined;
+  /** قالب Verify Lookup در پنل کاوه‌نگار (اختیاری — اگر تنظیم شود از verify/lookup استفاده می‌شود) */
+  smsOtpTemplate: string | undefined;
+  /** آیا پیامک واقعی فعال است؟ */
+  smsConfigured: boolean;
   /** سقف درخواست OTP به ازای هر شماره در پنجره زمانی */
   otpPerPhoneLimit: number;
   otpPhoneWindowSec: number;
@@ -80,6 +90,11 @@ export const appConfig = {
       accessTokenTtl: Number(env.ACCESS_TOKEN_TTL ?? 900),
       refreshTokenTtl: Number(env.REFRESH_TOKEN_TTL ?? 2592000),
       authDevMode: (env.AUTH_DEV_MODE ?? 'true') === 'true',
+      smsProvider: env.KAVENEGAR_API_KEY ? 'kavenegar' : undefined,
+      smsApiKey: env.KAVENEGAR_API_KEY,
+      smsSender: env.KAVENEGAR_SENDER,
+      smsOtpTemplate: env.KAVENEGAR_OTP_TEMPLATE,
+      smsConfigured: Boolean(env.KAVENEGAR_API_KEY),
       otpPerPhoneLimit: Number(env.OTP_PER_PHONE_LIMIT ?? 3),
       otpPhoneWindowSec: Number(env.OTP_PHONE_WINDOW_SEC ?? 600),
       otpPerIpLimit: Number(env.OTP_PER_IP_LIMIT ?? 20),

@@ -29,7 +29,7 @@ setupCallGlobals(); // فقط در dev/production build فعال است — در
 type Route =
   | { name: 'boot' }
   | { name: 'login-phone' }
-  | { name: 'login-otp'; phone: string }
+  | { name: 'login-otp'; phone: string; devCode?: string }
   | { name: 'chats' }
   | { name: 'chat'; conversation: ConversationDto }
   | { name: 'profile' };
@@ -399,11 +399,14 @@ export default function App() {
       <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
       {route.name === 'boot' && <Boot />}
       {route.name === 'login-phone' && (
-        <LoginPhoneScreen onCodeSent={(phone) => setRoute({ name: 'login-otp', phone })} />
+        <LoginPhoneScreen
+          onCodeSent={(phone, devCode) => setRoute({ name: 'login-otp', phone, devCode })}
+        />
       )}
       {route.name === 'login-otp' && (
         <LoginOtpScreen
           phone={route.phone}
+          devCode={route.devCode}
           onVerified={async (session) => {
             await persistSession(session);
             setRoute({ name: 'chats' });
