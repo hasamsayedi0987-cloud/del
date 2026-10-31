@@ -1,0 +1,24 @@
+{
+  "appId": "ir.del.app",
+  "productName": "Del",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "src/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": ["nsis", "portable"],
+    "signAndEditExecutable": false,
+    "artifactName": "Del-Setup-${version}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "Del-Setup-${version}.${ext}"
+  },
+  "portable": {
+    "artifactName": "Del-Portable-${version}.${ext}"
+  }
+}
