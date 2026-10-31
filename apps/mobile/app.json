@@ -9,13 +9,6 @@
     "icon": "./assets/icon.png",
     "plugins": [
       [
-        "@livekit/react-native",
-        {
-          "microphonePermission": "دل برای تماس صوتی به میکروفون نیاز دارد",
-          "cameraPermission": "دل برای تماس تصویری به دوربین نیاز دارد"
-        }
-      ],
-      [
         "expo-notifications",
         {
           "color": "#38BDF8"
