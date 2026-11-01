@@ -317,7 +317,7 @@ export class AdminService {
 
   private toAdminUserDto(u: {
     id: string;
-    phone: string;
+    phone: string | null;
     displayName: string | null;
     role: string;
     blockedAt: Date | null;
@@ -344,8 +344,8 @@ export class AdminService {
 
   private toReportDto(r: {
     id: string;
-    reporter: { id: string; displayName: string | null; phone: string };
-    reported: { id: string; displayName: string | null; phone: string; blockedAt: Date | null };
+    reporter: { id: string; displayName: string | null; phone: string | null };
+    reported: { id: string; displayName: string | null; phone: string | null; blockedAt: Date | null };
     conversationId: string | null;
     reason: string;
     note: string | null;

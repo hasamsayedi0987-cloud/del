@@ -78,6 +78,23 @@ export const api = {
       body: JSON.stringify({ phone }),
     }),
 
+  requestEmailOtp: (email: string) =>
+    request<RequestOtpResponse>('/auth/otp/request-email', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  verifyEmailOtp: (email: string, code: string, platform: string) =>
+    request<AuthSession>('/auth/otp/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        code,
+        platform,
+        deviceName: `${PlatformOS()} · Del Mobile`,
+      }),
+    }),
+
   verifyOtp: (phone: string, code: string, platform: string) =>
     request<AuthSession>('/auth/otp/verify', {
       method: 'POST',

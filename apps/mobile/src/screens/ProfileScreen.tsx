@@ -70,7 +70,10 @@ export function ProfileScreen({
       <Subtitle>پروفایل شما در دل — گام ۲: پیام‌رسانی بلادرنگ</Subtitle>
 
       <Card>
-        <Row label="شماره" value={toFaDigits(user.phone)} />
+        <Row
+          label={user.phone ? 'شماره' : 'ایمیل'}
+          value={toFaDigits(user.phone ?? user.email ?? '—')}
+        />
         <Row label="شناسه کاربر" value={user.id.slice(0, 8) + '…'} />
         <Row label="تاریخ عضویت" value={new Date(user.createdAt).toLocaleDateString('fa-IR')} />
       </Card>

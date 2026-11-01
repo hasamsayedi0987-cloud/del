@@ -13,8 +13,10 @@ import { RateLimitService } from '../common/rate-limit.service';
 import type { AccessPayload } from '../common/jwt-auth.guard';
 import type { DevicePlatform } from '@del/shared-types';
 import { isIranMobile, toE164 } from './phone.util';
+import { sendLoginCodeEmail } from './mailer';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { RequestEmailOtpDto, VerifyEmailOtpDto } from './dto/email-otp.dto';
 
 const OTP_SALT = 'del.otp.v1';
 
@@ -28,7 +30,8 @@ function httpError(status: number, code: string, message: string): HttpException
 
 function toUserDto(u: {
   id: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
   displayName: string | null;
   avatarUrl: string | null;
   about: string | null;
@@ -39,6 +42,7 @@ function toUserDto(u: {
   return {
     id: u.id,
     phone: u.phone,
+    email: u.email,
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
     about: u.about,
@@ -220,29 +224,7 @@ export class AuthService {
       where: { phone, consumedAt: null },
       orderBy: { createdAt: 'desc' },
     });
-
-    if (!otp) {
-      throw httpError(400, 'OTP_NOT_FOUND', 'No active code for this phone. Request a new one.');
-    }
-    if (otp.expiresAt < new Date()) {
-      throw httpError(400, 'OTP_EXPIRED', 'Code expired. Request a new one.');
-    }
-    if (otp.attempts >= cfg.otpMaxAttempts) {
-      throw httpError(429, 'OTP_LOCKED', 'Too many wrong attempts. Request a new code.');
-    }
-
-    if (otp.codeHash !== sha256(`${OTP_SALT}:${phone}:${dto.code}`)) {
-      await this.prisma.otpCode.update({
-        where: { id: otp.id },
-        data: { attempts: { increment: 1 } },
-      });
-      throw httpError(400, 'OTP_INVALID', 'Code is wrong');
-    }
-
-    await this.prisma.otpCode.update({
-      where: { id: otp.id },
-      data: { consumedAt: new Date() },
-    });
+    await this.consumeOtpOrThrow(otp, phone, dto.code, cfg);
 
     // ساخت کاربر در صورت نبود (Upsert) — شماره‌های ادمین (ADMIN_PHONES) نقش admin می‌گیرند
     const isAdminPhone = cfg.adminPhones.includes(phone);
@@ -255,6 +237,114 @@ export class AuthService {
       create: { phone, lastSeenAt: new Date(), role: isAdminPhone ? 'admin' : 'user' },
     });
 
+    return this.issueSessionFor(user, dto, cfg);
+  }
+
+  /**
+   * ورود با ایمیل — گام ۱: تولید و ارسال کد به ایمیل.
+   * در حالت توسعه یا بدون SMTP، کد در پاسخ برگردانده می‌شود (devCode).
+   */
+  async requestOtpEmail(dto: RequestEmailOtpDto, ip: string): Promise<RequestOtpResponse> {
+    const cfg = this.cfg();
+    const email = dto.email.trim().toLowerCase();
+
+    await this.rateLimit.hit(`otp:ip:${ip}`, 600, cfg.otpPerIpLimit);
+    await this.rateLimit.hit(`otp:email:${email}`, cfg.otpPhoneWindowSec, cfg.otpPerPhoneLimit);
+
+    const code = String(randomInt(100000, 1000000));
+    await this.prisma.$transaction([
+      // باطل‌کردن کدهای قبلیِ فعالِ همین ایمیل
+      this.prisma.otpCode.updateMany({
+        where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
+        data: { consumedAt: new Date() },
+      }),
+      this.prisma.otpCode.create({
+        data: {
+          email,
+          codeHash: sha256(`${OTP_SALT}:${email}:${code}`),
+          expiresAt: new Date(Date.now() + cfg.otpTtlSec * 1000),
+        },
+      }),
+    ]);
+
+    const sent = cfg.emailSmtpConfigured
+      ? await sendLoginCodeEmail(email, code, cfg.otpTtlSec)
+      : false;
+    if (sent) {
+      return { expiresInSeconds: cfg.otpTtlSec, emailSent: true };
+    }
+
+    if (cfg.authDevMode) {
+      this.logger.log(`[DEV MODE] Email OTP for ${email}: ${code}`);
+      return { devCode: code, expiresInSeconds: cfg.otpTtlSec };
+    }
+
+    this.logger.log(`Email OTP generated for ${email} — SMTP not configured`);
+    return { expiresInSeconds: cfg.otpTtlSec };
+  }
+
+  /** ورود با ایمیل — گام ۲: بررسی کد و صدور توکن‌ها (ایمیل‌های ADMIN_EMAILS ادمین می‌شوند) */
+  async verifyOtpEmail(dto: VerifyEmailOtpDto): Promise<AuthSession> {
+    const cfg = this.cfg();
+    const email = dto.email.trim().toLowerCase();
+
+    const otp = await this.prisma.otpCode.findFirst({
+      where: { email, consumedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    await this.consumeOtpOrThrow(otp, email, dto.code, cfg);
+
+    const isAdminEmail = cfg.adminEmails.includes(email);
+    const user = await this.prisma.user.upsert({
+      where: { email },
+      update: {
+        lastSeenAt: new Date(),
+        ...(isAdminEmail && { role: 'admin' }),
+      },
+      create: { email, lastSeenAt: new Date(), role: isAdminEmail ? 'admin' : 'user' },
+    });
+
+    return this.issueSessionFor(user, dto, cfg);
+  }
+
+  /**
+   * اعتبارسنجی کد OTP (مشترک شماره/ایمیل) — identifier کلید هش است.
+   * در پایان کد مصرف می‌شود؛ در هر خطا HttpException مناسب پرتاب می‌شود.
+   */
+  private async consumeOtpOrThrow(
+    otp: { id: string; codeHash: string; expiresAt: Date; attempts: number } | null,
+    identifier: string,
+    code: string,
+    cfg: AppConfig,
+  ): Promise<void> {
+    if (!otp) {
+      throw httpError(400, 'OTP_NOT_FOUND', 'No active code for this account. Request a new one.');
+    }
+    if (otp.expiresAt < new Date()) {
+      throw httpError(400, 'OTP_EXPIRED', 'Code expired. Request a new one.');
+    }
+    if (otp.attempts >= cfg.otpMaxAttempts) {
+      throw httpError(429, 'OTP_LOCKED', 'Too many wrong attempts. Request a new code.');
+    }
+    if (otp.codeHash !== sha256(`${OTP_SALT}:${identifier}:${code}`)) {
+      await this.prisma.otpCode.update({
+        where: { id: otp.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw httpError(400, 'OTP_INVALID', 'Code is wrong');
+    }
+    await this.prisma.otpCode.update({
+      where: { id: otp.id },
+      data: { consumedAt: new Date() },
+    });
+  }
+
+  /** ساخت دستگاه + صدور توکن‌ها برای کاربر تأییدشده (مشترک شماره/ایمیل) */
+  private async issueSessionFor(
+    user: Parameters<typeof toUserDto>[0] & { blockedAt: Date | null },
+    dto: { platform?: DevicePlatform; deviceName?: string },
+    cfg: AppConfig,
+  ): Promise<AuthSession> {
     // حساب مسدودشده (گام ۱۰) — حتی با کد صحیح ورود نمی‌کند
     if (user.blockedAt) {
       throw httpError(403, 'ACCOUNT_BLOCKED', 'This account has been blocked');

@@ -37,6 +37,16 @@ export interface AppConfig {
   otpPerIpLimit: number;
   otpTtlSec: number;
   otpMaxAttempts: number;
+  // ————— ایمیل (گام ۱۲) — ورود با کد ایمیلی —————
+  /** SMTP هر سرویسی: Gmail (App Password)، Brevo، Mailgun، … */
+  smtpHost: string | undefined;
+  smtpPort: number;
+  smtpUser: string | undefined;
+  smtpPass: string | undefined;
+  /** فرستنده، مثل Del <no-reply@…> — اگر خالی باشد smtpUser */
+  smtpFrom: string | undefined;
+  /** آیا ارسال ایمیل پیکربندی شده است؟ */
+  emailSmtpConfigured: boolean;
   version: string;
   // ————— رسانه (گام ۵) — S3/MinIO —————
   s3Endpoint: string | undefined;
@@ -84,6 +94,8 @@ export interface AppConfig {
   // ————— مدیریت (گام ۱۰) —————
   /** شماره‌های ادمین جداشده با کاما — در ورود، نقش admin می‌گیرند (ADMIN_PHONES=+98912…,+98913…) */
   adminPhones: string[];
+  /** ایمیل‌های ادمین جداشده با کاما — در ورود ایمیلی، نقش admin می‌گیرند */
+  adminEmails: string[];
   /** آدرس ایمیل/نشانی DPO برای سیاست حریم خصوصی (سند ۰۹) */
   privacyContact: string | undefined;
 }
@@ -162,8 +174,18 @@ export const appConfig = {
       aiEnabled: (env.AI_ENABLED ?? 'true') === 'true',
       adminPhones: (env.ADMIN_PHONES ?? '')
         .split(',')
-        .map((s) => s.trim())
+        .map((s) => s.trim().toLowerCase())
         .filter(Boolean),
+      adminEmails: (env.ADMIN_EMAILS ?? '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+      smtpHost: env.SMTP_HOST,
+      smtpPort: Number(env.SMTP_PORT ?? 587),
+      smtpUser: env.SMTP_USER,
+      smtpPass: env.SMTP_PASS,
+      smtpFrom: env.SMTP_FROM,
+      emailSmtpConfigured: Boolean(env.SMTP_HOST && (env.SMTP_USER || env.SMTP_FROM)),
       privacyContact: env.PRIVACY_CONTACT,
     };
   },

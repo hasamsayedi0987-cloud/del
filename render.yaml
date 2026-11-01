@@ -1,0 +1,43 @@
+# Del — Render Blueprint (سرور همیشه‌روشن رایگان)
+# یک بار در render.com با حساب GitHub وارد شوید → New → Blueprint → همین ریپو → Apply
+# وب‌سرویس + دیتابیس Postgres خودکار ساخته می‌شود؛ آدرس عمومی: https://del-messenger-api.onrender.com
+services:
+  - type: web
+    name: del-messenger-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: del-db
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # بدون SMTP تنظیم‌شده، کد ورود در پاسخ API به اپ برمی‌گردد (نمایش داخل اپ)
+      # برای ایمیل واقعی: SMTP_HOST/SMTP_USER/SMTP_PASS/SMTP_FROM را در پنل Render پر کنید
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      # Redis لازم نیست — fallback حافظه‌ای فعال است
+      - key: REDIS_URL
+        value: ""
+
+databases:
+  - name: del-db
+    databaseName: del
+    plan: free

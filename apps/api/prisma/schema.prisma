@@ -13,7 +13,9 @@ datasource db {
 
 model User {
   id          String   @id @default(uuid()) @db.Uuid
-  phone       String   @unique // فرمت E.164 مثل +989121234567
+  // ورود با شماره یا ایمیل — هر کاربر حداقل یکی را دارد
+  phone       String?  @unique // فرمت E.164 مثل +989121234567 (کاربرِ ایمیل‌محور null است)
+  email       String?  @unique // حروف کوچک‌شده — ورود با کد ایمیل
   displayName String?
   avatarUrl   String?
   about       String?
@@ -62,7 +64,8 @@ model Device {
 /// کد یک‌بارمصرف ورود — فقط هش ذخیره می‌شود، هرگز خودِ کد
 model OtpCode {
   id         String    @id @default(uuid()) @db.Uuid
-  phone      String
+  phone      String? // یا phone یا email پر می‌شود
+  email      String?
   codeHash   String // sha256(code + salt)
   expiresAt  DateTime
   consumedAt DateTime?
@@ -70,6 +73,7 @@ model OtpCode {
   createdAt  DateTime  @default(now())
 
   @@index([phone, createdAt])
+  @@index([email, createdAt])
 }
 
 model RefreshToken {

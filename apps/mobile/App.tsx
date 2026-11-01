@@ -15,6 +15,7 @@ import {
   onNotificationResponse,
 } from './src/notifications';
 import { LoginPhoneScreen } from './src/screens/LoginPhoneScreen';
+import { LoginEmailScreen } from './src/screens/LoginEmailScreen';
 import { LoginOtpScreen } from './src/screens/LoginOtpScreen';
 import { ChatsScreen } from './src/screens/ChatsScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
@@ -29,7 +30,8 @@ setupCallGlobals(); // فقط در dev/production build فعال است — در
 type Route =
   | { name: 'boot' }
   | { name: 'login-phone' }
-  | { name: 'login-otp'; phone: string; devCode?: string }
+  | { name: 'login-email' }
+  | { name: 'login-otp'; identifier: string; kind: 'phone' | 'email'; devCode?: string }
   | { name: 'chats' }
   | { name: 'chat'; conversation: ConversationDto }
   | { name: 'profile' };
@@ -400,18 +402,32 @@ export default function App() {
       {route.name === 'boot' && <Boot />}
       {route.name === 'login-phone' && (
         <LoginPhoneScreen
-          onCodeSent={(phone, devCode) => setRoute({ name: 'login-otp', phone, devCode })}
+          onCodeSent={(phone, devCode) =>
+            setRoute({ name: 'login-otp', identifier: phone, kind: 'phone', devCode })
+          }
+          onEmailLogin={() => setRoute({ name: 'login-email' })}
+        />
+      )}
+      {route.name === 'login-email' && (
+        <LoginEmailScreen
+          onCodeSent={(email, res) =>
+            setRoute({ name: 'login-otp', identifier: email, kind: 'email', devCode: res.devCode })
+          }
+          onBack={() => setRoute({ name: 'login-phone' })}
         />
       )}
       {route.name === 'login-otp' && (
         <LoginOtpScreen
-          phone={route.phone}
+          identifier={route.identifier}
+          kind={route.kind}
           devCode={route.devCode}
           onVerified={async (session) => {
             await persistSession(session);
             setRoute({ name: 'chats' });
           }}
-          onBack={() => setRoute({ name: 'login-phone' })}
+          onBack={() =>
+            setRoute(route.kind === 'email' ? { name: 'login-email' } : { name: 'login-phone' })
+          }
         />
       )}
       {route.name === 'chats' && accessToken && user && (

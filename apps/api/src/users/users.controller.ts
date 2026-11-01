@@ -93,7 +93,7 @@ export class UsersController {
   async byPhone(@Req() req: AuthedRequest, @Param('phone') phone: string): Promise<{
     id: string;
     displayName: string | null;
-    phone: string;
+    phone: string | null;
   }> {
     void req;
     const e164 = toE164(decodeURIComponent(phone));
@@ -184,7 +184,8 @@ export class UsersController {
 
   private toUserDto(u: {
     id: string;
-    phone: string;
+    phone: string | null;
+    email: string | null;
     displayName: string | null;
     avatarUrl: string | null;
     about: string | null;
@@ -195,6 +196,7 @@ export class UsersController {
     return {
       id: u.id,
       phone: u.phone,
+      email: u.email,
       displayName: u.displayName,
       avatarUrl: u.avatarUrl,
       about: u.about,

@@ -35,12 +35,14 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.35.5",
-    "socket.io": "^4.8.4"
+    "socket.io": "^4.8.4",
+    "nodemailer": "^7.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "@types/nodemailer": "^7.0.0"
   }
 }

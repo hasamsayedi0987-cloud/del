@@ -35,8 +35,10 @@ const DISPLAY_LIST: Country[] = [
 
 export function LoginPhoneScreen({
   onCodeSent,
+  onEmailLogin,
 }: {
   onCodeSent: (phone: string, devCode?: string) => void;
+  onEmailLogin: () => void;
 }) {
   const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
   const [phone, setPhone] = useState('');
@@ -149,6 +151,7 @@ export function LoginPhoneScreen({
         busy={busy}
         disabled={toLatinDigits(phone).replace(/\D/g, '').length < 6}
       />
+      <Button label="ورود با ایمیل" variant="ghost" onPress={onEmailLogin} />
 
       {/* تنظیمات پیشرفته — برای سرور خودمیزبان؛ پیش‌فرض نیازی به آن نیست */}
       <Text

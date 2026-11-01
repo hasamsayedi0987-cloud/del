@@ -4,6 +4,7 @@ import type { AuthSession, RequestOtpResponse } from '@del/shared-types';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { RequestEmailOtpDto, VerifyEmailOtpDto } from './dto/email-otp.dto';
 import { LogoutDto, RefreshDto } from './dto/token.dto';
 import { JwtAuthGuard, AuthedRequest } from '../common/jwt-auth.guard';
 
@@ -22,6 +23,18 @@ export class AuthController {
   @HttpCode(200)
   verifyOtp(@Body() dto: VerifyOtpDto): Promise<AuthSession> {
     return this.auth.verifyOtp(dto);
+  }
+
+  @Post('otp/request-email')
+  @HttpCode(200)
+  requestOtpEmail(@Body() dto: RequestEmailOtpDto, @Ip() ip: string): Promise<RequestOtpResponse> {
+    return this.auth.requestOtpEmail(dto, ip ?? 'unknown');
+  }
+
+  @Post('otp/verify-email')
+  @HttpCode(200)
+  verifyOtpEmail(@Body() dto: VerifyEmailOtpDto): Promise<AuthSession> {
+    return this.auth.verifyOtpEmail(dto);
   }
 
   @Post('refresh')

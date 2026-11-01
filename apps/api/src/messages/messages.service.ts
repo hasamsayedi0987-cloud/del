@@ -99,7 +99,7 @@ function toParticipantDto(p: {
   userId: string;
   role: string;
   lastReadSeq: number;
-  user: { id: string; phone: string; displayName: string | null };
+  user: { id: string; phone: string | null; displayName: string | null };
 }): ParticipantDto {
   return {
     userId: p.userId,
@@ -610,7 +610,7 @@ export class MessagesService {
    */
   async syncBootstrap(meId: string): Promise<{
     serverTime: string;
-    user: { id: string; phone: string; displayName: string | null; avatarUrl: string | null; about: string | null; createdAt: string };
+    user: { id: string; phone: string | null; displayName: string | null; avatarUrl: string | null; about: string | null; createdAt: string };
     conversations: ConversationDto[];
   }> {
     const user = await this.prisma.user.findUnique({ where: { id: meId } });

@@ -8,12 +8,15 @@ import { Platform } from 'react-native';
 import type { AuthSession } from '@del/shared-types';
 
 export function LoginOtpScreen({
-  phone,
+  identifier,
+  kind,
   devCode,
   onVerified,
   onBack,
 }: {
-  phone: string;
+  /** شمارهٔ بین‌المللی یا ایمیل — بسته به kind */
+  identifier: string;
+  kind: 'phone' | 'email';
   devCode?: string;
   onVerified: (session: AuthSession) => void;
   onBack: () => void;
@@ -26,7 +29,10 @@ export function LoginOtpScreen({
     setError(null);
     setBusy(true);
     try {
-      const session = await api.verifyOtp(phone, code.trim(), Platform.OS);
+      const session =
+        kind === 'email'
+          ? await api.verifyEmailOtp(identifier, code.trim(), Platform.OS)
+          : await api.verifyOtp(identifier, code.trim(), Platform.OS);
       onVerified(session);
     } catch (e) {
       setError(e instanceof ApiError ? faError(e) : 'خطای غیرمنتظره');
@@ -39,7 +45,11 @@ export function LoginOtpScreen({
     <Screen>
       <Logo size={72} />
       <Title>کد تأیید</Title>
-      <Subtitle>کد ۶ رقمی به شماره {phone} پیامک شد</Subtitle>
+      <Subtitle>
+        {kind === 'email'
+          ? `کد ۶ رقمی به ایمیل ${identifier} ارسال شد`
+          : `کد ۶ رقمی به شماره ${identifier} پیامک شد`}
+      </Subtitle>
 
       <Input
         value={code}
@@ -52,14 +62,14 @@ export function LoginOtpScreen({
 
       {devCode ? (
         <Text style={styles.devCode}>
-          حالت توسعه (پیامک متصل نیست) — کد: {devCode}
+          حالت توسعه (پیامک/ایمیل متصل نیست) — کد: {devCode}
         </Text>
       ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Button label="ورود به دل" onPress={submit} busy={busy} disabled={code.length < 4} />
-      <Button label="تغییر شماره" variant="ghost" onPress={onBack} />
+      <Button label={kind === 'email' ? 'تغییر ایمیل' : 'تغییر شماره'} variant="ghost" onPress={onBack} />
     </Screen>
   );
 }

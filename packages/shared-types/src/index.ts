@@ -8,7 +8,10 @@ export type DevicePlatform = 'android' | 'ios' | 'windows' | 'macos' | 'linux' |
 
 export interface UserDto {
   id: string;
-  phone: string;
+  /** ورود با شماره — کاربرِ ایمیل‌محور null دارد */
+  phone: string | null;
+  /** ورود با ایمیل — کاربرِ شماره‌محور null دارد */
+  email?: string | null;
   displayName: string | null;
   avatarUrl: string | null;
   about: string | null;
@@ -35,6 +38,8 @@ export interface RequestOtpResponse {
   devCode?: string;
   /** true = کد با پیامک واقعی ارسال شد (سرویس SMS پیکربندی شده) */
   smsSent?: boolean;
+  /** true = کد با ایمیل واقعی ارسال شد (SMTP پیکربندی شده) */
+  emailSent?: boolean;
   expiresInSeconds: number;
 }
 
@@ -84,7 +89,7 @@ export interface MessageDto {
 export interface ParticipantDto {
   userId: string;
   displayName: string | null;
-  phone: string;
+  phone: string | null;
   lastReadSeq: number;
   /** نقش در گروه (گام ۴) — فقط گروه */
   role?: 'admin' | 'member';
@@ -460,7 +465,7 @@ export type UserRole = 'user' | 'admin';
 /** کاربر از دید ادمین — آمار و وضعیت انسداد */
 export interface AdminUserDto {
   id: string;
-  phone: string;
+  phone: string | null;
   displayName: string | null;
   role: UserRole;
   blockedAt: string | null;
@@ -488,8 +493,8 @@ export type ReportStatus = 'open' | 'resolved' | 'dismissed';
 
 export interface ReportDto {
   id: string;
-  reporter: { id: string; displayName: string | null; phone: string };
-  reported: { id: string; displayName: string | null; phone: string; blockedAt: string | null };
+  reporter: { id: string; displayName: string | null; phone: string | null };
+  reported: { id: string; displayName: string | null; phone: string | null; blockedAt: string | null };
   conversationId: string | null;
   reason: ReportReason;
   note: string | null;
@@ -533,7 +538,7 @@ export interface AdminMetrics {
 
 /** فهرست مسدودسازی‌های من — GET /users/me/blocks */
 export interface BlockListDto {
-  items: { userId: string; displayName: string | null; phone: string; createdAt: string }[];
+  items: { userId: string; displayName: string | null; phone: string | null; createdAt: string }[];
 }
 
 /** رویداد WS مسدودسازی حساب توسط ادمین — socket بلافاصله قطع می‌شود */
