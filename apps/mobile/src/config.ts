@@ -10,8 +10,8 @@ import * as SecureStore from 'expo-secure-store';
 const STORE_KEY = 'del.server.url';
 const COUNTRY_KEY = 'del.country.cc';
 
-/** آدرس پیش‌فرض سرور نسخه نصب‌شده — سرور دل روی شبکه محلی توسعه‌دهنده */
-export const DEFAULT_SERVER_URL = 'http://192.168.1.5:3000';
+/** آدرس پیش‌فرض سرور نسخه نصب‌شده — دیپلوی رایگان Render (همیشه‌روشن، بدون کامپیوتر) */
+export const DEFAULT_SERVER_URL = 'https://del-messenger-api.onrender.com';
 
 let current = __DEV__
   ? Platform.OS === 'android'
