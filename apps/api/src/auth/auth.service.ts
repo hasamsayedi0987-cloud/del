@@ -12,7 +12,7 @@ import { PrismaService } from '../infra/prisma.service';
 import { RateLimitService } from '../common/rate-limit.service';
 import type { AccessPayload } from '../common/jwt-auth.guard';
 import type { DevicePlatform } from '@del/shared-types';
-import { toE164 } from './phone.util';
+import { isIranMobile, toE164 } from './phone.util';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 
@@ -109,12 +109,33 @@ export class AuthService {
   }
 
   /**
-   * ارسال کد ورود با کاوه‌نگار — گام ۱۱.
-   *  • اگر KAVENEGAR_OTP_TEMPLATE تنظیم شده باشد از verify/lookup (قالب تأییدشده پنل) استفاده می‌شود
-   *  • وگرنه از sms/send با متن ساده
+   * ارسال کد ورود — مسیریابی بر اساس کد کشور (پشتیبانی از سراسر جهان):
+   *  • ایران (+98) → کاوه‌نگار
+   *  • سایر کشورها (+90 ترکیه، +93 افغانستان، +49 آلمان، …) → Twilio
    * خطاها هرگز به کلاینت نشت نمی‌کنند — فقط false برمی‌گردد.
    */
   private async sendOtpSms(phone: string, code: string): Promise<boolean> {
+    const cfg = this.cfg();
+    if (isIranMobile(phone) && cfg.smsKavenegarConfigured) {
+      return this.sendViaKavenegar(phone, code);
+    }
+    if (cfg.smsTwilioConfigured) {
+      return this.sendViaTwilio(phone, code);
+    }
+    if (cfg.smsKavenegarConfigured && !isIranMobile(phone)) {
+      this.logger.warn(
+        `SMS for ${phone}: only Kavenegar is configured and it delivers inside Iran — ` +
+          `for international numbers set TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER`,
+      );
+    }
+    return false;
+  }
+
+  /** کاوه‌نگار — شماره‌های ایران:
+   *  • اگر KAVENEGAR_OTP_TEMPLATE تنظیم شده باشد از verify/lookup (قالب تأییدشده پنل) استفاده می‌شود
+   *  • وگرنه از sms/send با متن ساده
+   */
+  private async sendViaKavenegar(phone: string, code: string): Promise<boolean> {
     const cfg = this.cfg();
     const key = cfg.smsApiKey as string;
     const receptor = phone.replace(/^\+/, ''); // ‎+98912…‎ → 98912… (قالب کاوه‌نگار)
@@ -141,6 +162,48 @@ export class AuthService {
       return ok;
     } catch (e) {
       this.logger.warn(`Kavenegar error for ${phone}: ${String(e)}`);
+      return false;
+    }
+  }
+
+  /** Twilio — همهٔ کشورها به‌جز ایران (ایران را کاوه‌نگار می‌فرستد) */
+  private async sendViaTwilio(phone: string, code: string): Promise<boolean> {
+    const cfg = this.cfg();
+    const sid = cfg.twilioAccountSid as string;
+    const token = cfg.twilioAuthToken as string;
+    const params = new URLSearchParams({
+      To: phone,
+      Body: `Del | کد ورود شما: ${code}`,
+    });
+    if (cfg.twilioMessagingServiceSid) {
+      params.set('MessagingServiceSid', cfg.twilioMessagingServiceSid);
+    } else {
+      params.set('From', cfg.twilioFromNumber as string);
+    }
+    try {
+      const res = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: params.toString(),
+        },
+      );
+      const body = (await res.json().catch(() => null)) as
+        | { sid?: string; code?: number; message?: string }
+        | null;
+      const ok = res.ok && Boolean(body?.sid);
+      if (!ok) {
+        this.logger.warn(
+          `Twilio send failed for ${phone}: http=${res.status} code=${body?.code ?? 'n/a'} ${body?.message ?? ''}`,
+        );
+      }
+      return ok;
+    } catch (e) {
+      this.logger.warn(`Twilio error for ${phone}: ${String(e)}`);
       return false;
     }
   }

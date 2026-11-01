@@ -9,15 +9,26 @@ export interface AppConfig {
   refreshTokenTtl: number;
   /** حالت توسعه: کد OTP در پاسخ برگردانده می‌شود (بدون سرویس SMS) */
   authDevMode: boolean;
-  // ————— پیامک (گام ۱۱) — کاوه‌نگار —————
-  /** در صورت تنظیم KAVENEGAR_API_KEY کد ورود با پیامک واقعی ارسال می‌شود */
-  smsProvider: 'kavenegar' | undefined;
+  // ————— پیامک (گام ۱۱) — کاوه‌نگار (ایران) —————
+  /** در صورت تنظیم KAVENEGAR_API_KEY کد ورود شماره‌های ایرانی با پیامک واقعی ارسال می‌شود */
+  smsProvider: 'kavenegar' | 'twilio' | undefined;
   smsApiKey: string | undefined;
   /** شماره فرستنده خط خدماتی (اختیاری — فقط برای sms/send) */
   smsSender: string | undefined;
   /** قالب Verify Lookup در پنل کاوه‌نگار (اختیاری — اگر تنظیم شود از verify/lookup استفاده می‌شود) */
   smsOtpTemplate: string | undefined;
-  /** آیا پیامک واقعی فعال است؟ */
+  /** آیا کاوه‌نگار تنظیم شده است؟ */
+  smsKavenegarConfigured: boolean;
+  // ————— پیامک بین‌المللی — Twilio (همهٔ کشورها) —————
+  /** شماره‌های غیرایرانی از طریق Twilio ارسال می‌شوند (TR/AZ/AF/DE/…؛ تقریباً همهٔ کشورها) */
+  twilioAccountSid: string | undefined;
+  twilioAuthToken: string | undefined;
+  /** شماره فرستنده Twilio (یا MessagingServiceSid زیر) */
+  twilioFromNumber: string | undefined;
+  twilioMessagingServiceSid: string | undefined;
+  /** آیا Twilio تنظیم شده است؟ */
+  smsTwilioConfigured: boolean;
+  /** آیا مسیر پیامک واقعی (ایران یا بین‌المللی) وجود دارد؟ */
   smsConfigured: boolean;
   /** سقف درخواست OTP به ازای هر شماره در پنجره زمانی */
   otpPerPhoneLimit: number;
@@ -90,11 +101,28 @@ export const appConfig = {
       accessTokenTtl: Number(env.ACCESS_TOKEN_TTL ?? 900),
       refreshTokenTtl: Number(env.REFRESH_TOKEN_TTL ?? 2592000),
       authDevMode: (env.AUTH_DEV_MODE ?? 'true') === 'true',
-      smsProvider: env.KAVENEGAR_API_KEY ? 'kavenegar' : undefined,
+      smsProvider: env.KAVENEGAR_API_KEY
+        ? 'kavenegar'
+        : env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN
+          ? 'twilio'
+          : undefined,
       smsApiKey: env.KAVENEGAR_API_KEY,
       smsSender: env.KAVENEGAR_SENDER,
       smsOtpTemplate: env.KAVENEGAR_OTP_TEMPLATE,
-      smsConfigured: Boolean(env.KAVENEGAR_API_KEY),
+      smsKavenegarConfigured: Boolean(env.KAVENEGAR_API_KEY),
+      twilioAccountSid: env.TWILIO_ACCOUNT_SID,
+      twilioAuthToken: env.TWILIO_AUTH_TOKEN,
+      twilioFromNumber: env.TWILIO_FROM_NUMBER,
+      twilioMessagingServiceSid: env.TWILIO_MESSAGING_SERVICE_SID,
+      smsTwilioConfigured: Boolean(
+        env.TWILIO_ACCOUNT_SID &&
+          env.TWILIO_AUTH_TOKEN &&
+          (env.TWILIO_FROM_NUMBER || env.TWILIO_MESSAGING_SERVICE_SID),
+      ),
+      smsConfigured: Boolean(env.KAVENEGAR_API_KEY ||
+        (env.TWILIO_ACCOUNT_SID &&
+          env.TWILIO_AUTH_TOKEN &&
+          (env.TWILIO_FROM_NUMBER || env.TWILIO_MESSAGING_SERVICE_SID))),
       otpPerPhoneLimit: Number(env.OTP_PER_PHONE_LIMIT ?? 3),
       otpPhoneWindowSec: Number(env.OTP_PHONE_WINDOW_SEC ?? 600),
       otpPerIpLimit: Number(env.OTP_PER_IP_LIMIT ?? 20),

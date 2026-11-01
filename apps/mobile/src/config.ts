@@ -8,6 +8,7 @@ import * as SecureStore from 'expo-secure-store';
  *    فقط در «تنظیمات پیشرفته» صفحه ورود قابل تغییر است (مثلاً بعد از تغییر IP سرور خودمیزبان).
  */
 const STORE_KEY = 'del.server.url';
+const COUNTRY_KEY = 'del.country.cc';
 
 /** آدرس پیش‌فرض سرور نسخه نصب‌شده — سرور دل روی شبکه محلی توسعه‌دهنده */
 export const DEFAULT_SERVER_URL = 'http://192.168.1.5:3000';
@@ -43,4 +44,22 @@ export async function saveApiBaseUrl(url: string): Promise<string> {
     /* حافظه امن در دسترس نیست — فقط در حافظه همین اجرا می‌ماند */
   }
   return clean;
+}
+
+/** بازیابی کد ISO کشور انتخابی قبلی (مثلاً 'TR') — هنگام بوت صفحه ورود */
+export async function loadSavedCountry(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(COUNTRY_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** ذخیرهٔ کشور انتخابی — دفعهٔ بعد همان در ابتدا انتخاب است */
+export async function saveCountry(cc: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(COUNTRY_KEY, cc);
+  } catch {
+    /* بی‌اهمیت — انتخاب فقط برای همین اجرا حفظ می‌شود */
+  }
 }
