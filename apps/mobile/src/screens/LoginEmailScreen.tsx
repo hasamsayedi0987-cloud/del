@@ -3,16 +3,14 @@ import { Text, StyleSheet } from 'react-native';
 import { api, ApiError } from '../api';
 import { theme } from '../theme';
 import { Button, Input, Logo, Screen, Subtitle, Title } from '../components/ui';
-import { faError } from './LoginPhoneScreen';
+import { faError } from '../faError';
 import type { RequestOtpResponse } from '@del/shared-types';
 
-/** ورود با ایمیل — کد یک‌بارمصرف به ایمیل ارسال می‌شود (بدون نیاز به پیامک) */
+/** ورود با ایمیل — تنها راه ورود به دل؛ کد یک‌بارمصرف به ایمیل ارسال می‌شود */
 export function LoginEmailScreen({
   onCodeSent,
-  onBack,
 }: {
   onCodeSent: (email: string, res: RequestOtpResponse) => void;
-  onBack: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,7 +54,6 @@ export function LoginEmailScreen({
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Button label="ارسال کد" onPress={submit} busy={busy} disabled={email.trim().length < 5} />
-      <Button label="ورود با شمارهٔ موبایل" variant="ghost" onPress={onBack} />
     </Screen>
   );
 }

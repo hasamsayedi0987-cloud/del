@@ -72,12 +72,6 @@ async function request<T>(path: string, init?: RequestInit & { token?: string })
 export const api = {
   health: () => request<{ status: string }>('/health'),
 
-  requestOtp: (phone: string) =>
-    request<RequestOtpResponse>('/auth/otp/request', {
-      method: 'POST',
-      body: JSON.stringify({ phone }),
-    }),
-
   requestEmailOtp: (email: string) =>
     request<RequestOtpResponse>('/auth/otp/request-email', {
       method: 'POST',
@@ -89,17 +83,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({
         email,
-        code,
-        platform,
-        deviceName: `${PlatformOS()} · Del Mobile`,
-      }),
-    }),
-
-  verifyOtp: (phone: string, code: string, platform: string) =>
-    request<AuthSession>('/auth/otp/verify', {
-      method: 'POST',
-      body: JSON.stringify({
-        phone,
         code,
         platform,
         deviceName: `${PlatformOS()} · Del Mobile`,

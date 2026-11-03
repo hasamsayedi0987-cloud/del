@@ -7,7 +7,8 @@
 # ============================================================
 
 FROM node:20-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
+    && pnpm config set store-dir /repo/.pnpm-store --global
 WORKDIR /repo
 
 # ---------- deps ----------
@@ -20,17 +21,23 @@ RUN pnpm install --frozen-lockfile --filter @del/api...
 
 # ---------- build ----------
 FROM base AS build
+# استور pnpm از مرحلهٔ deps — تا deploy بدون دانلود مجدد انجام شود
+COPY --from=deps /repo/.pnpm-store /repo/.pnpm-store
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /repo/packages/shared-types/node_modules ./packages/shared-types/node_modules
-COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY packages/shared-types packages/shared-types
 COPY apps/api apps/api
 RUN pnpm --filter @del/shared-types build \
     && pnpm --filter @del/api db:generate \
     && pnpm --filter @del/api build \
-    # خروجی خودکفا فقط با وابستگی‌های پروداکشن
-    && pnpm --filter @del/api --deploy ../out --prod
+    # خروجی خودکفا فقط با وابستگی‌های پروداکشن — deploy زیرفرمان pnpm است، نه فلگ
+    && pnpm --filter @del/api deploy --prod /repo/out \
+    # اسکیما و مهاجرت‌های Prisma باید داخل خروجی باشند
+    && cp -r apps/api/prisma /repo/out/prisma \
+    # تولید کلاینت Prisma داخل همان خروجی — تا زمان اجرا به شبکه نیاز نداشته باشد
+    && cd /repo/out && ./node_modules/.bin/prisma generate
 
 # ---------- runner ----------
 FROM node:20-alpine AS runner
@@ -42,8 +49,9 @@ COPY --from=build --chown=del:del /repo/out ./out
 
 USER del
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/api/v1/health >/dev/null 2>&1 || exit 1
 
 WORKDIR /app/out
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+# prisma CLI (هم‌نسخهٔ @prisma/client) از node_modules خود خروجی اجرا می‌شود — بدون npx و بدون اینترنت
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && node dist/main.js"]

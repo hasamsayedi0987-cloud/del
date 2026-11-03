@@ -4,7 +4,7 @@ import { api, ApiError } from '../api';
 import { getSocket } from '../socket';
 import { theme } from '../theme';
 import { Button, Logo, Screen, Subtitle, Title } from '../components/ui';
-import { faError } from './LoginPhoneScreen';
+import { faError } from '../faError';
 import {
   e2eeReady,
   publishIdentity,

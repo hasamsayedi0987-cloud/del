@@ -3,20 +3,18 @@ import { Text, StyleSheet } from 'react-native';
 import { api, ApiError } from '../api';
 import { theme } from '../theme';
 import { Button, Input, Logo, Screen, Subtitle, Title } from '../components/ui';
-import { faError } from './LoginPhoneScreen';
+import { faError } from '../faError';
 import { Platform } from 'react-native';
 import type { AuthSession } from '@del/shared-types';
 
 export function LoginOtpScreen({
-  identifier,
-  kind,
+  email,
   devCode,
   onVerified,
   onBack,
 }: {
-  /** شمارهٔ بین‌المللی یا ایمیل — بسته به kind */
-  identifier: string;
-  kind: 'phone' | 'email';
+  /** ایمیلی که کد به آن ارسال شده است */
+  email: string;
   devCode?: string;
   onVerified: (session: AuthSession) => void;
   onBack: () => void;
@@ -29,10 +27,7 @@ export function LoginOtpScreen({
     setError(null);
     setBusy(true);
     try {
-      const session =
-        kind === 'email'
-          ? await api.verifyEmailOtp(identifier, code.trim(), Platform.OS)
-          : await api.verifyOtp(identifier, code.trim(), Platform.OS);
+      const session = await api.verifyEmailOtp(email, code.trim(), Platform.OS);
       onVerified(session);
     } catch (e) {
       setError(e instanceof ApiError ? faError(e) : 'خطای غیرمنتظره');
@@ -45,11 +40,7 @@ export function LoginOtpScreen({
     <Screen>
       <Logo size={72} />
       <Title>کد تأیید</Title>
-      <Subtitle>
-        {kind === 'email'
-          ? `کد ۶ رقمی به ایمیل ${identifier} ارسال شد`
-          : `کد ۶ رقمی به شماره ${identifier} پیامک شد`}
-      </Subtitle>
+      <Subtitle>کد ۶ رقمی به ایمیل {email} ارسال شد</Subtitle>
 
       <Input
         value={code}
@@ -62,14 +53,14 @@ export function LoginOtpScreen({
 
       {devCode ? (
         <Text style={styles.devCode}>
-          حالت توسعه (پیامک/ایمیل متصل نیست) — کد: {devCode}
+          سرور هنوز ایمیل متصل ندارد — کد آزمایشی: {devCode}
         </Text>
       ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Button label="ورود به دل" onPress={submit} busy={busy} disabled={code.length < 4} />
-      <Button label={kind === 'email' ? 'تغییر ایمیل' : 'تغییر شماره'} variant="ghost" onPress={onBack} />
+      <Button label="تغییر ایمیل" variant="ghost" onPress={onBack} />
     </Screen>
   );
 }

@@ -1,0 +1,28 @@
+# کانتکست بیلد Docker را سبک نگه می‌دارد — فقط چیزهایی که Dockerfile.api لازم دارد
+**/node_modules
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+.git
+.github
+.vscode
+.idea
+
+# فقط apps/api و packages/shared-types استفاده می‌شوند
+apps/mobile
+apps/desktop
+packages/api-client
+packages/config
+packages/design-system
+packages/validation
+packages/e2ee
+docs
+infrastructure
+ci
+scripts
+
+**/*.apk
+*.log
+.env
+.env.*
+!.env.example

@@ -14,7 +14,6 @@ import {
   scheduleCallNotification,
   onNotificationResponse,
 } from './src/notifications';
-import { LoginPhoneScreen } from './src/screens/LoginPhoneScreen';
 import { LoginEmailScreen } from './src/screens/LoginEmailScreen';
 import { LoginOtpScreen } from './src/screens/LoginOtpScreen';
 import { ChatsScreen } from './src/screens/ChatsScreen';
@@ -29,9 +28,8 @@ setupCallGlobals(); // فقط در dev/production build فعال است — در
 
 type Route =
   | { name: 'boot' }
-  | { name: 'login-phone' }
   | { name: 'login-email' }
-  | { name: 'login-otp'; identifier: string; kind: 'phone' | 'email'; devCode?: string }
+  | { name: 'login-otp'; email: string; devCode?: string }
   | { name: 'chats' }
   | { name: 'chat'; conversation: ConversationDto }
   | { name: 'profile' };
@@ -104,7 +102,7 @@ export default function App() {
       } catch {
         // نشست خراب — ورود مجدد
       }
-      setRoute({ name: 'login-phone' });
+      setRoute({ name: 'login-email' });
     })();
   }, []);
 
@@ -131,7 +129,7 @@ export default function App() {
     setAccessToken(null);
     setRefreshToken(null);
     setUser(null);
-    setRoute({ name: 'login-phone' });
+    setRoute({ name: 'login-email' });
   }, [refreshToken, accessToken]);
 
   const sessionExpired = useCallback(async () => {
@@ -209,7 +207,7 @@ export default function App() {
         setRefreshToken(null);
         setUser(null);
         Alert.alert('حساب مسدود شد', 'حساب شما توسط پشتیبانی مسدود شده است.');
-        setRoute({ name: 'login-phone' });
+        setRoute({ name: 'login-email' });
       })();
     };
 
@@ -400,34 +398,22 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
       {route.name === 'boot' && <Boot />}
-      {route.name === 'login-phone' && (
-        <LoginPhoneScreen
-          onCodeSent={(phone, devCode) =>
-            setRoute({ name: 'login-otp', identifier: phone, kind: 'phone', devCode })
-          }
-          onEmailLogin={() => setRoute({ name: 'login-email' })}
-        />
-      )}
       {route.name === 'login-email' && (
         <LoginEmailScreen
           onCodeSent={(email, res) =>
-            setRoute({ name: 'login-otp', identifier: email, kind: 'email', devCode: res.devCode })
+            setRoute({ name: 'login-otp', email, devCode: res.devCode })
           }
-          onBack={() => setRoute({ name: 'login-phone' })}
         />
       )}
       {route.name === 'login-otp' && (
         <LoginOtpScreen
-          identifier={route.identifier}
-          kind={route.kind}
+          email={route.email}
           devCode={route.devCode}
           onVerified={async (session) => {
             await persistSession(session);
             setRoute({ name: 'chats' });
           }}
-          onBack={() =>
-            setRoute(route.kind === 'email' ? { name: 'login-email' } : { name: 'login-phone' })
-          }
+          onBack={() => setRoute({ name: 'login-email' })}
         />
       )}
       {route.name === 'chats' && accessToken && user && (
