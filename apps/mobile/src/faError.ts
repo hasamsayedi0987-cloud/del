@@ -17,8 +17,13 @@ export function faError(e: ApiError): string {
       return 'کد فعالی وجود ندارد؛ کد جدید بگیرید';
     case 'ACCOUNT_BLOCKED':
       return 'حساب شما مسدود شده است';
+    case 'EMAIL_SMTP_NOT_CONFIGURED':
+      return 'سرور هنوز سرویس ارسال ایمیل ندارد؛ بعداً دوباره تلاش کنید';
+    case 'EMAIL_SEND_FAILED':
+      return 'ارسال ایمیل کد ناموفق بود؛ چند لحظه بعد دوباره تلاش کنید';
     case 'NETWORK':
-      return e.message;
+      // بیدار شدن سرور از حالت خواب (پلن رایگان) ممکن است اولین درخواست را ناموفق کند
+      return `${e.message} — چند لحظه صبر کنید و دوباره تلاش کنید`;
     default:
       return 'خطا در ارتباط با سرور';
   }

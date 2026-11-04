@@ -59,7 +59,8 @@ export interface HealthResponse {
   status: 'ok' | 'degraded';
   services: {
     database: 'up' | 'down';
-    redis: 'up' | 'down';
+    /** disabled یعنی REDIS_URL تنظیم نشده و fallback حافظه‌ای فعال است — وضعیت طبیعی تک‌نود */
+    redis: 'up' | 'down' | 'disabled';
   };
   uptimeSeconds: number;
   timestamp: string;

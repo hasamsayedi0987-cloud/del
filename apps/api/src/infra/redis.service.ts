@@ -38,6 +38,11 @@ export class RedisService implements OnModuleDestroy {
     return this.client?.status === 'ready';
   }
 
+  /** آیا اصلاً REDIS_URL تنظیم شده است؟ (نه = fallback حافظه‌ای، وضعیت طبیعی تک‌نود) */
+  get configured(): boolean {
+    return this.client !== null;
+  }
+
   /** اجرای دستور با تلورانس خطا — در صورت قطعی Redis مقدار پیش‌فرض برمی‌گردد */
   async safe<T>(fn: (redis: Redis) => Promise<T>, fallback: T): Promise<T> {
     if (!this.client || !this.connected) return fallback;

@@ -16,11 +16,18 @@ export class HealthController {
       .$queryRaw`SELECT 1`
       .then(() => true)
       .catch(() => false);
+    // Redis اختیاری است: بدون REDIS_URL سرویس‌ها از fallback حافظه‌ای استفاده می‌کنند — این «down» نیست
+    const redisConfigured = this.redis.configured;
     const redisUp = await this.redis.ping();
+    const redisState: HealthResponse['services']['redis'] = redisUp
+      ? 'up'
+      : redisConfigured
+        ? 'down'
+        : 'disabled';
 
     return {
-      status: dbUp && redisUp ? 'ok' : 'degraded',
-      services: { database: dbUp ? 'up' : 'down', redis: redisUp ? 'up' : 'down' },
+      status: dbUp && (redisUp || !redisConfigured) ? 'ok' : 'degraded',
+      services: { database: dbUp ? 'up' : 'down', redis: redisState },
       uptimeSeconds: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version ?? '0.1.0',

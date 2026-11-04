@@ -279,8 +279,21 @@ export class AuthService {
       return { devCode: code, expiresInSeconds: cfg.otpTtlSec };
     }
 
-    this.logger.log(`Email OTP generated for ${email} — SMTP not configured`);
-    return { expiresInSeconds: cfg.otpTtlSec };
+    // سکوت ممنوع: اگر ایمیل نرفت، کلاینت باید بداند وگرنه کاربر منتظر ایمیلی می‌ماند که هرگز نمی‌رسد
+    if (!cfg.emailSmtpConfigured) {
+      this.logger.warn(`Email OTP for ${email} refused — SMTP_* not configured on server`);
+      throw httpError(
+        503,
+        'EMAIL_SMTP_NOT_CONFIGURED',
+        'Email delivery is not configured on the server yet. Please try again later.',
+      );
+    }
+    this.logger.warn(`Email OTP for ${email} failed — SMTP send rejected (see Mailer log above)`);
+    throw httpError(
+      503,
+      'EMAIL_SEND_FAILED',
+      'Could not send the code email right now. Please try again in a minute.',
+    );
   }
 
   /** ورود با ایمیل — گام ۲: بررسی کد و صدور توکن‌ها (ایمیل‌های ADMIN_EMAILS ادمین می‌شوند) */
