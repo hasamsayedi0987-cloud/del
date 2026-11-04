@@ -26,6 +26,7 @@ import {
   SummarizeDto,
   TranslateDto,
   UsageQueryDto,
+  ChatDto,
 } from './dto/ai.dto';
 
 @ApiTags('ai')
@@ -59,6 +60,13 @@ export class AiController {
   @HttpCode(200)
   fix(@Req() req: AuthedRequest, @Body() dto: FixDto) {
     return this.ai.fix(req.user.sub, dto.text);
+  }
+
+  /** گفتگو با دستیار دل — تاریخچه از کلاینت (محلی) می‌آید */
+  @Post('chat')
+  @HttpCode(200)
+  chat(@Req() req: AuthedRequest, @Body() dto: ChatDto) {
+    return this.ai.chat(req.user.sub, dto.text, dto.history ?? []);
   }
 
   /** پیشنهاد پاسخ بر اساس آخرین پیام‌های گفتگو */

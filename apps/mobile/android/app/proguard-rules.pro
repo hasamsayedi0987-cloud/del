@@ -12,3 +12,8 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# v1.4 — نگه‌داشتن کلاس‌های LiveKit/WebRTC برای R8
+-keep class io.livekit.** { *; }
+-keep class org.webrtc.** { *; }
+-keep class livekit.org.webrtc.** { *; }

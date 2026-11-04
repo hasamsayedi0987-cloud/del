@@ -5,10 +5,13 @@ import {
   ArrayUnique,
   IsArray,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  Max,
+  Min,
 } from 'class-validator';
 
 export class CreateGroupDto {
@@ -38,9 +41,17 @@ export class AddMembersDto {
 
 export class UpdateGroupDto {
   @ApiProperty({ example: 'نام تازه گروه' })
+  @IsOptional()
   @IsString()
   @Length(1, 80)
-  title!: string;
+  title?: string;
+
+  /** پیام محوشونده (v1.4) — 0 خاموش، 3600، 86400، 604800، 2592000 ثانیه */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2592000)
+  disappearSec?: number;
 }
 
 export class UpdateMemberRoleDto {

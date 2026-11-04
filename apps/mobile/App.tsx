@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import { api } from './src/api';
 import { loadApiBaseUrl } from './src/config';
 import { connectSocket, disconnectSocket, getSocket } from './src/socket';
-import { theme } from './src/theme';
+import { loadThemeSettings, useTheme, watchAutoTheme } from './src/theme';
 import { setupCallGlobals } from './src/lk';
 import {
   ensureAndroidChannels,
@@ -16,10 +16,12 @@ import {
 } from './src/notifications';
 import { LoginEmailScreen } from './src/screens/LoginEmailScreen';
 import { LoginOtpScreen } from './src/screens/LoginOtpScreen';
-import { ChatsScreen } from './src/screens/ChatsScreen';
+import { HomeScreen } from './src/screens/HomeScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { CallScreen } from './src/screens/CallScreen';
+import { NameScreen } from './src/screens/NameScreen';
+import { AiChatScreen } from './src/screens/AiChatScreen';
 import { initE2ee } from './src/e2ee/engine';
 import type { CallState } from './src/screens/CallScreen';
 import type { AuthSession, ConversationDto, UserDto } from '@del/shared-types';
@@ -32,7 +34,9 @@ type Route =
   | { name: 'login-otp'; email: string; devCode?: string }
   | { name: 'chats' }
   | { name: 'chat'; conversation: ConversationDto }
-  | { name: 'profile' };
+  | { name: 'profile' }
+  | { name: 'name' }
+  | { name: 'ai-chat' };
 
 const KEYS = {
   access: 'del.accessToken',
@@ -41,6 +45,8 @@ const KEYS = {
 };
 
 export default function App() {
+  const theme = useTheme();
+  useEffect(() => watchAutoTheme(), []);
   const [route, setRoute] = useState<Route>({ name: 'boot' });
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
@@ -84,6 +90,7 @@ export default function App() {
     (async () => {
       try {
         await loadApiBaseUrl(); // گام ۱۱: آدرس سرور ذخیره‌شده — قبل از هر درخواست
+        void loadThemeSettings(); // v1.4: تم روشن/تاریک/خودکار + فونت + پس‌زمینه
         const [a, r, userJson] = await Promise.all([
           SecureStore.getItemAsync(KEYS.access),
           SecureStore.getItemAsync(KEYS.refresh),
@@ -394,10 +401,11 @@ export default function App() {
   }, [accessToken]);
 
 
+  const styles = useStyles(theme);
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.bg} />
-      {route.name === 'boot' && <Boot />}
+      <StatusBar barStyle={theme.dark ? 'light-content' : 'dark-content'} backgroundColor={theme.bg} />
+      {route.name === 'boot' && <BootThemed />}
       {route.name === 'login-email' && (
         <LoginEmailScreen
           onCodeSent={(email, res) =>
@@ -411,13 +419,14 @@ export default function App() {
           devCode={route.devCode}
           onVerified={async (session) => {
             await persistSession(session);
-            setRoute({ name: 'chats' });
+            // v1.4: جریان روان ورود — کاربر تازه: نام + عکس اختیاری
+            setRoute(session.user.displayName ? { name: 'chats' } : { name: 'name' });
           }}
           onBack={() => setRoute({ name: 'login-email' })}
         />
       )}
       {route.name === 'chats' && accessToken && user && (
-        <ChatsScreen
+        <HomeScreen
           accessToken={accessToken}
           myUserId={user.id}
           onOpenChat={(conversation) => setRoute({ name: 'chat', conversation })}
@@ -433,6 +442,22 @@ export default function App() {
           onBack={() => setRoute({ name: 'chats' })}
           onRequestCall={startCall}
         />
+      )}
+      {route.name === 'name' && accessToken && (
+        <NameScreen
+          accessToken={accessToken}
+          initialName={user?.displayName ?? null}
+          onDone={(u) => {
+            setUser(u);
+            const userJson = JSON.stringify(u);
+            void SecureStore.setItemAsync(KEYS.user, userJson);
+            setRoute({ name: 'chats' });
+          }}
+          onSkip={() => setRoute({ name: 'chats' })}
+        />
+      )}
+      {route.name === 'ai-chat' && accessToken && (
+        <AiChatScreen accessToken={accessToken} onBack={() => setRoute({ name: 'chats' })} />
       )}
       {route.name === 'profile' && accessToken && user && (
         <ProfileScreen
@@ -457,14 +482,6 @@ export default function App() {
   );
 }
 
-function Boot() {
-  return (
-    <View style={styles.boot}>
-      <ActivityIndicator color={theme.accent} size="large" />
-      <Text style={styles.bootText}>در حال بازکردن دل…</Text>
-    </View>
-  );
-}
 
 /** پیام خطای تماس به فارسی (گام ۶) */
 function faCallError(e: unknown): string {
@@ -487,8 +504,21 @@ function faCallError(e: unknown): string {
   }
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
-  boot: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  bootText: { color: theme.textDim, fontSize: 15 },
-});
+const useStyles = (theme: ReturnType<typeof useTheme>) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: theme.bg },
+    boot: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+    bootText: { color: theme.textDim, fontSize: 15 },
+  });
+
+/** Boot با تم زنده */
+function BootThemed() {
+  const theme = useTheme();
+  const styles = useStyles(theme);
+  return (
+    <View style={styles.boot}>
+      <ActivityIndicator color={theme.accent} size="large" />
+      <Text style={styles.bootText}>در حال بازکردن دل…</Text>
+    </View>
+  );
+}

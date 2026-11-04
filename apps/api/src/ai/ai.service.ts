@@ -50,6 +50,8 @@ const SYSTEM_PROMPTS: Record<AiFeatureName, string> = {
     'تو دستیار گفتگوی «دل» هستی. با توجه به رونوشت گفتگو، چند پاسخ کوتاه، طبیعی و محترمانه پیشنهاد بده؛ هر پیشنهاد در یک خط جداگانه.',
   summarize:
     'تو خلاصه‌ساز گفتگوی «دل» هستی. یک خلاصهٔ کوتاه فارسی (حداکثر ۵ خط) از نکات اصلی گفتگو بنویس؛ بی‌طرف و بدون نقل‌قول طولانی.',
+  chat:
+    'تو «دستیار دل» هستی — دستیار گفتگوی داخل اپ پیام‌رسان دل. به زبان کاربر پاسخ بده (پیش‌فرض فارسی). کوتاه، دقیق و دوستانه؛ برای ترجمه هم توانا هستی. هیچ دادهٔ شخصی درخواست نکن و محتوای مشکوک را رد کن.',
 };
 
 /** محدودساز درون‌حافظه‌ای اختصاصی AI (کد خطای AI_RATE_LIMITED) */
@@ -250,6 +252,39 @@ export class AiService implements OnModuleInit {
       system: SYSTEM_PROMPTS.fix,
       user: text,
       maxTokens: 900,
+      userId: meId,
+    });
+  }
+
+  /** گفتگو با دستیار دل (v1.4) — متن کاربر + تاریخچهٔ محلی؛ بدون خواندن DB گفتگوها */
+  async chat(meId: string, text: string, history: string[] = []): Promise<AiTextResult> {
+    this.ensureEnabled();
+    const user = await this.prisma.user.findUnique({
+      where: { id: meId },
+      select: { aiConsent: true },
+    });
+    if (!user?.aiConsent) {
+      throw httpError(
+        403,
+        'AI_CONSENT_REQUIRED',
+        'برای گفتگو با دستیار ابتدا رضایت هوش مصنوعی را فعال کنید',
+      );
+    }
+    this.limiter.check(meId, this.config.get('aiRatePerMin') ?? 20);
+    const clean = text.trim();
+    if (!clean || clean.length > MAX_INPUT_CHARS) {
+      throw httpError(400, 'AI_TEXT_TOO_LONG', 'متن بیش از حد بلند است');
+    }
+    const context = history
+      .slice(-20)
+      .map((h) => h.slice(0, 1000))
+      .join('\n')
+      .slice(0, MAX_INPUT_CHARS);
+    return this.run('chat', {
+      feature: 'chat',
+      system: SYSTEM_PROMPTS.chat,
+      user: context ? `${context}\nکاربر: ${clean}` : clean,
+      maxTokens: 1200,
       userId: meId,
     });
   }

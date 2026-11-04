@@ -4,6 +4,8 @@
  */
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -46,6 +48,20 @@ export class FixDto {
   text!: string;
 }
 
+/** گفتگو با دستیار دل (v1.4) — تاریخچهٔ محلی کلاینت برای زمینه فرستاده می‌شود */
+export class ChatDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  text!: string;
+
+  /** آخرین پیام‌های این گفتگوی محلی — حداکثر ۲۰ خط */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  history?: string[];
+}
+
 export class SuggestDto {
   @IsUUID()
   conversationId!: string;
@@ -76,7 +92,7 @@ export class SummarizeDto {
   unreadOnly?: boolean;
 }
 
-export const AI_FEATURES = ['translate', 'fix', 'suggest', 'summarize'] as const;
+export const AI_FEATURES = ['translate', 'fix', 'suggest', 'summarize', 'chat'] as const;
 export type AiFeatureName = (typeof AI_FEATURES)[number];
 
 export class UsageQueryDto {

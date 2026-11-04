@@ -18,7 +18,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { api, ApiError } from '../api';
 import { getSignedUrl, uploadMedia } from '../media';
 import { getSocket, uuid } from '../socket';
-import { theme } from '../theme';
+import { fs, getThemeSettings, useTheme, wallpaperSource, type DelTheme, type WallpaperKey } from '../theme';
+import { ImageBackground } from 'react-native';
 import {
   decryptDirect,
   encryptDirect,
@@ -81,11 +82,18 @@ export function ChatScreen({
   /** گام ۶: درخواست تماس صوتی/تصویری — فقط گفتگوهای ۱:۱ */
   onRequestCall?: (conversation: ConversationDto, kind: 'audio' | 'video') => void;
 }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   const [messages, setMessages] = useState<LocalMsg[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState('');
   const [uploading, setUploading] = useState(false);
   const listRef = useRef<FlatList<LocalMsg>>(null);
+  // ————— v1.4: پس‌زمینهٔ گفتگو + پیام محوشونده —————
+  const wallpaper: WallpaperKey = getThemeSettings().wallpaper;
+  const wallSrc = wallpaperSource(wallpaper);
+  const [disappearSec, setDisappearSec] = useState(conversation.disappearSec ?? 0);
+  const [disappearDialog, setDisappearDialog] = useState(false);
 
   // ————— گام ۴: گروه‌ها — جزئیات کامل (اعضا + نقش‌ها) —————
   const isGroup = conversation.type === 'group';
@@ -655,7 +663,7 @@ export function ChatScreen({
     });
   }, [accessToken, convId, runAi]);
 
-  return (
+  const body = (
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -715,6 +723,15 @@ export function ChatScreen({
             ) : null}
             <TouchableOpacity
               style={styles.callBtn}
+              onPress={() => setDisappearDialog(true)}
+              accessibilityLabel="پیام محوشونده"
+            >
+              <Text style={[styles.callBtnIcon, disappearSec > 0 ? styles.disappearOn : null]}>
+                ⏲
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.callBtn}
               onPress={openPeerMenu}
               accessibilityLabel="گزینه‌های گفتگو"
             >
@@ -722,7 +739,13 @@ export function ChatScreen({
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={{ width: 64 }} />
+          <TouchableOpacity
+            style={styles.callBtn}
+            onPress={() => setDisappearDialog(true)}
+            accessibilityLabel="پیام محوشونده"
+          >
+            <Text style={[styles.callBtnIcon, disappearSec > 0 ? styles.disappearOn : null]}>⏲</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -907,12 +930,82 @@ export function ChatScreen({
           <Text style={styles.sendText}>ارسال</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ————— v1.4: گفتگوی پیام محوشونده ————— */}
+      <Modal visible={disappearDialog} transparent animationType="fade">
+        <View style={styles.disappearBackdrop}>
+          <View style={styles.disappearCard}>
+            <Text style={styles.disappearTitle}>پیام‌های محوشونده</Text>
+            <Text style={styles.disappearSub}>
+              پیام‌های جدید بعد از مدت انتخابی به‌طور خودکار از سرور و دستگاه‌ها پاک می‌شوند.
+            </Text>
+            {[
+              { v: 0, label: 'خاموش' },
+              { v: 3600, label: '۱ ساعت' },
+              { v: 86400, label: '۲۴ ساعت' },
+              { v: 604800, label: '۷ روز' },
+              { v: 2592000, label: '۳۰ روز' },
+            ].map((o) => (
+              <TouchableOpacity
+                key={o.v}
+                style={[styles.disappearOption, disappearSec === o.v && styles.disappearOptionOn]}
+                onPress={() => {
+                  const next = o.v;
+                  setDisappearSec(next);
+                  setDisappearDialog(false);
+                  if (next !== disappearSec) {
+                    api
+                      .setDisappear(accessToken, conversation.id, next)
+                      .then(() => undefined)
+                      .catch(() => undefined);
+                  }
+                }}
+              >
+                <Text
+                  style={[
+                    styles.disappearOptionText,
+                    disappearSec === o.v && styles.disappearOptionTextOn,
+                  ]}
+                >
+                  {o.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.disappearCancel}
+              onPress={() => setDisappearDialog(false)}
+            >
+              <Text style={styles.disappearCancelText}>بستن</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
+  );
+
+  if (!wallSrc) return body;
+  return (
+    <ImageBackground source={wallSrc} style={styles.root} imageStyle={styles.wallImage}>
+      {body}
+    </ImageBackground>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: DelTheme) =>
+  StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
+  wallImage: { opacity: theme.dark ? 0.16 : 0.35 },
+  disappearOn: { color: theme.accent },
+  disappearBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  disappearCard: { width: '100%', maxWidth: 360, backgroundColor: theme.surfaceAlt, borderColor: theme.border, borderWidth: 1, borderRadius: theme.radius, padding: 18 },
+  disappearTitle: { color: theme.text, fontSize: fs(17), fontWeight: '800', textAlign: 'right' },
+  disappearSub: { color: theme.textDim, fontSize: fs(13), lineHeight: fs(20), textAlign: 'right', marginTop: 6 },
+  disappearOption: { borderWidth: 1, borderColor: theme.border, borderRadius: theme.radius, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
+  disappearOptionOn: { borderColor: theme.accent, backgroundColor: theme.accentSoft },
+  disappearOptionText: { color: theme.textDim, fontSize: fs(15), fontWeight: '700' },
+  disappearOptionTextOn: { color: theme.accent },
+  disappearCancel: { alignItems: 'center', marginTop: 14, padding: 8 },
+  disappearCancelText: { color: theme.textDim, fontSize: fs(14) },
   header: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -1147,6 +1240,8 @@ function MediaBubble({
   media: MediaAssetDto;
   mine: boolean;
 }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 

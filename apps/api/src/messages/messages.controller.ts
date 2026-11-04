@@ -141,9 +141,16 @@ export class MessagesController {
     await this.messages.leaveGroup(req.user.sub, id);
   }
 
-  /** تغییر نام گروه — فقط ادمین */
+  /** تغییر نام گروه (فقط ادمین) و/یا پیام‌های محوشونده (v1.4) */
   @Patch(':id')
-  renameGroup(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: UpdateGroupDto) {
-    return this.messages.renameGroup(req.user.sub, id, dto.title);
+  async update(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateGroupDto,
+  ) {
+    if (dto.disappearSec !== undefined) {
+      return this.messages.setDisappearSec(req.user.sub, id, dto.disappearSec);
+    }
+    return this.messages.renameGroup(req.user.sub, id, dto.title ?? '');
   }
 }

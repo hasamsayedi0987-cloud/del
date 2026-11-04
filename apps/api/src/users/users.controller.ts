@@ -11,8 +11,10 @@ import {
   Patch,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import type { BlockListDto, ReportDto, UserDto } from '@del/shared-types';
@@ -109,6 +111,81 @@ export class UsersController {
     return { id: user.id, displayName: user.displayName, phone: user.phone };
   }
 
+  /** یافتن کاربر با ایمیل — برای شروع گفتگو در اپ ایمیل‌محور (v1.4) */
+  @Get('by-email/:email')
+  async byEmail(@Req() req: AuthedRequest, @Param('email') email: string): Promise<{
+    id: string;
+    displayName: string | null;
+    email: string | null;
+  }> {
+    void req;
+    const normalized = decodeURIComponent(email).trim().toLowerCase();
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+    const user = valid
+      ? await this.prisma.user.findUnique({ where: { email: normalized } })
+      : null;
+    if (!user) {
+      throw new NotFoundException({
+        statusCode: 404,
+        error: { code: 'USER_NOT_FOUND', message: 'No user with this email' },
+      });
+    }
+    return { id: user.id, displayName: user.displayName, email: user.email };
+  }
+
+  // ————— عکس پروفایل (v1.4) — تصویر کوچک در دیتابیس —————
+
+  /** آپلود آواتار — jpeg/png base64؛ سمت کلاینت به 256px فشرده می‌شود */
+  @Post('me/avatar')
+  async uploadAvatar(@Req() req: AuthedRequest, @Body() dto: { imageData?: string; mime?: string }): Promise<UserDto> {
+    const raw = (dto.imageData ?? '').replace(/^data:[^;]+;base64,/, '');
+    const buf = Buffer.from(raw, 'base64');
+    if (buf.length < 64 || buf.length > 512 * 1024) {
+      throw new HttpException(
+        { statusCode: 400, error: { code: 'AVATAR_TOO_BIG', message: 'تصویر باید بین ۶۴ بایت تا ۵۱۲ کیلوبایت باشد' } },
+        400,
+      );
+    }
+    const mime = dto.mime === 'image/png' ? 'image/png' : 'image/jpeg';
+    const user = await this.prisma.user.update({
+      where: { id: req.user.sub },
+      data: { avatarImage: buf, avatarMime: mime },
+    });
+    return this.toUserDto(user);
+  }
+
+  /** حذف آواتار */
+  @Delete('me/avatar')
+  async removeAvatar(@Req() req: AuthedRequest): Promise<UserDto> {
+    const user = await this.prisma.user.update({
+      where: { id: req.user.sub },
+      data: { avatarImage: null, avatarMime: null },
+    });
+    return this.toUserDto(user);
+  }
+
+  /** بایت آواتار کاربر — با کش نسخه‌دار (پارامتر v در آدرس) */
+  @Get(':id/avatar')
+  async avatar(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    void req;
+    const u = await this.prisma.user.findUnique({
+      where: { id },
+      select: { avatarImage: true, avatarMime: true },
+    });
+    if (!u?.avatarImage) {
+      throw new NotFoundException({
+        statusCode: 404,
+        error: { code: 'AVATAR_NOT_FOUND', message: 'بدون عکس پروفایل' },
+      });
+    }
+    res.setHeader('Cache-Control', 'private, max-age=604800');
+    res.type(u.avatarMime ?? 'image/jpeg').send(Buffer.from(u.avatarImage));
+  }
+
   // ————— مسدودسازی و گزارش (گام ۱۰) —————
 
   /** فهرست مسدودسازی‌های من */
@@ -188,17 +265,24 @@ export class UsersController {
     email: string | null;
     displayName: string | null;
     avatarUrl: string | null;
+    avatarImage?: Uint8Array | null;
+    updatedAt?: Date;
     about: string | null;
     aiConsent: boolean;
     role: string;
     createdAt: Date;
   }): UserDto {
+    // آواتار در v1.4 داخل دیتابیس است — آدرس عمومی با نسخه برای شکستن کش
+    const avatarUrl =
+      u.avatarImage && u.updatedAt
+        ? `/api/v1/users/${u.id}/avatar?v=${u.updatedAt.getTime()}`
+        : u.avatarUrl;
     return {
       id: u.id,
       phone: u.phone,
       email: u.email,
       displayName: u.displayName,
-      avatarUrl: u.avatarUrl,
+      avatarUrl,
       about: u.about,
       aiConsent: u.aiConsent,
       role: u.role as UserDto['role'],

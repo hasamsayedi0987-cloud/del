@@ -14,6 +14,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { E2eeModule } from './e2ee/e2ee.module';
 import { AiModule } from './ai/ai.module';
 import { AdminModule } from './admin/admin.module';
+import { StoriesModule } from './stories/stories.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { AdminModule } from './admin/admin.module';
     AuthModule,
     UsersModule,
     MessagesModule,
+    StoriesModule,
     PresenceModule,
     MediaModule,
     CallsModule,

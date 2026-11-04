@@ -44,6 +44,11 @@ model User {
   blocksIssued   UserBlock[]    @relation("blocker")
   blocksReceived UserBlock[]    @relation("blocked")
   auditEntries   AuditLog[]
+  stories        Story[]
+  storyViews     StoryView[]
+  /** عکس پروفایل — بایت تصویر کوچک (≤256px) در دیتابیس؛ سرو با GET /users/:id/avatar */
+  avatarImage    Bytes?
+  avatarMime     String?
 }
 
 model Device {
@@ -102,6 +107,8 @@ model Conversation {
   lastSeq       Int       @default(0)
   lastMessageAt DateTime?
   createdAt     DateTime  @default(now())
+  /** پیام‌های محوشونده (v1.4) — 0 = خاموش، وگرنه TTL به ثانیه (86400 = ۲۴ ساعت) */
+  disappearSec  Int       @default(0)
   /** همگام‌سازی افزایشی (گام ۷) — با هر تغییر (پیام/نام/عضویت غیرمستقیم) به‌روز می‌شود */
   updatedAt     DateTime  @default(now()) @updatedAt
 
@@ -149,6 +156,8 @@ model Message {
   createdAt      DateTime  @default(now())
   editedAt       DateTime?
   deletedAt      DateTime?
+  /** پیام محوشونده (v1.4) — اگر تنظیم شود در این زمان توسط cleanup حذف می‌شود */
+  expiresAt      DateTime?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id])
@@ -346,4 +355,47 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([action])
+}
+
+// ————— استوری‌ها (v1.4) —————
+// وضعیت ۲۴ ساعته: متن با پس‌زمینه رنگی یا تصویر (از رسانهٔ موجود). بعد از انقضا پاک می‌شود.
+
+model Story {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  /** text | image */
+  kind         String    @default("text")
+  /** برای kind=text — حداکثر ۲۰۰ کاراکتر */
+  text         String?
+  /** کلید پس‌زمینهٔ متن (پالت اپ) — aurora | sunset | ocean | forest | night | bloom */
+  bgKey        String    @default("aurora")
+  /** برای kind=image — بایت تصویر فشرده (کلاینت ≤1280px jpeg می‌فشرده) */
+  mediaData    Bytes?
+  mediaMime    String?
+  /** رنگ متن روی پس‌زمینه */
+  textColor    String    @default("#FFFFFF")
+  createdAt    DateTime  @default(now())
+  /** ۲۴ ساعت بعد از ایجاد */
+  expiresAt    DateTime
+  viewCount    Int       @default(0)
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  views StoryView[]
+
+  @@index([expiresAt])
+  @@index([userId, createdAt])
+}
+
+/** بازدید استوری — یک‌بار برای هر (استوری، کاربر) */
+model StoryView {
+  id        String   @id @default(uuid()) @db.Uuid
+  storyId   String   @db.Uuid
+  userId    String   @db.Uuid
+  viewedAt  DateTime @default(now())
+
+  story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId])
+  @@index([userId])
 }

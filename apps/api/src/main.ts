@@ -37,6 +37,8 @@ async function bootstrap(): Promise<void> {
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   });
   app.disable('x-powered-by');
+  // v1.4: استوری/آواتار به‌صورت base64 از API می‌آیند — سقف ۲ مگابایت کافی است
+  app.useBodyParser('json', { limit: '2mb' });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -44,7 +46,7 @@ async function bootstrap(): Promise<void> {
       forbidNonWhitelisted: false,
     }),
   );
-  // نکته: حجم body به‌صورت پیش‌فرض 100kb محدود است — پیوست‌های رسانه از Presigned URL می‌روند نه API
+  // نکته: پیوست‌های رسانه از Presigned URL می‌روند نه API — فقط استوری/آواتار از body (۲mb)
 
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()

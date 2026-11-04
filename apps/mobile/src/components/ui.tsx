@@ -10,10 +10,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { theme } from '../theme';
+import { fs, useTheme, type DelTheme } from '../theme';
 
-/** صفحه پایه با پس‌زمینه Crystal Blue و چیدمان RTL */
+/** صفحه پایه با تم پویا (روشن/تاریک) و چیدمان RTL */
 export function Screen({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -31,6 +33,8 @@ export function Screen({ children }: { children: React.ReactNode }) {
 }
 
 export function Logo({ size = 96 }: { size?: number }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   return (
     <View style={[styles.logo, { width: size, height: size, borderRadius: size / 2 }]}>
       <Text style={[styles.logoText, { fontSize: size * 0.42 }]}>دل</Text>
@@ -39,14 +43,20 @@ export function Logo({ size = 96 }: { size?: number }) {
 }
 
 export function Title({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   return <Text style={styles.title}>{children}</Text>;
 }
 
 export function Subtitle({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   return <Text style={styles.subtitle}>{children}</Text>;
 }
 
 export function Input(props: React.ComponentProps<typeof TextInput>) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   return (
     <TextInput
       placeholderTextColor={theme.textDim}
@@ -69,13 +79,24 @@ export function Button({
   variant?: 'primary' | 'ghost' | 'danger';
   disabled?: boolean;
 }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   const bg =
     variant === 'primary'
       ? theme.accentStrong
       : variant === 'danger'
-        ? 'rgba(248,113,113,0.15)'
+        ? theme.dark
+          ? 'rgba(248,113,113,0.15)'
+          : 'rgba(220,38,38,0.10)'
         : 'transparent';
-  const fg = variant === 'primary' ? '#04121F' : variant === 'danger' ? theme.danger : theme.accent;
+  const fg =
+    variant === 'primary'
+      ? theme.dark
+        ? '#04121F'
+        : '#FFFFFF'
+      : variant === 'danger'
+        ? theme.danger
+        : theme.accent;
 
   return (
     <Pressable
@@ -88,7 +109,7 @@ export function Button({
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={variant === 'primary' ? '#04121F' : theme.accent} />
+        <ActivityIndicator color={fg} />
       ) : (
         <Text style={[styles.buttonText, { color: fg }]}>{label}</Text>
       )}
@@ -97,70 +118,73 @@ export function Button({
 }
 
 export function Card({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   return <View style={styles.card}>{children}</View>;
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: {
-    flexGrow: 1,
-    padding: theme.space * 1.5,
-    paddingTop: 72,
-  },
-  logo: {
-    alignSelf: 'center',
-    backgroundColor: theme.accentSoft,
-    borderWidth: 2,
-    borderColor: theme.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoText: {
-    color: theme.accent,
-    fontWeight: '800',
-  },
-  title: {
-    color: theme.text,
-    fontSize: 26,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginTop: 24,
-  },
-  subtitle: {
-    color: theme.textDim,
-    fontSize: 15,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 24,
-  },
-  input: {
-    backgroundColor: theme.surface,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: theme.radius,
-    color: theme.text,
-    fontSize: 17,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    textAlign: 'right',
-    marginTop: 24,
-  },
-  button: {
-    borderRadius: theme.radius,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 14,
-  },
-  buttonText: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  card: {
-    backgroundColor: theme.surface,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: theme.radius,
-    padding: theme.space,
-    marginTop: theme.space,
-  },
-});
+const makeStyles = (theme: DelTheme) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    container: {
+      flexGrow: 1,
+      padding: theme.space * 1.5,
+      paddingTop: 72,
+    },
+    logo: {
+      alignSelf: 'center',
+      backgroundColor: theme.accentSoft,
+      borderWidth: 2,
+      borderColor: theme.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    logoText: {
+      color: theme.accent,
+      fontWeight: '800',
+    },
+    title: {
+      color: theme.text,
+      fontSize: fs(26),
+      fontWeight: '800',
+      textAlign: 'center',
+      marginTop: 24,
+    },
+    subtitle: {
+      color: theme.textDim,
+      fontSize: fs(15),
+      textAlign: 'center',
+      marginTop: 8,
+      lineHeight: fs(24),
+    },
+    input: {
+      backgroundColor: theme.surface,
+      borderColor: theme.border,
+      borderWidth: 1,
+      borderRadius: theme.radius,
+      color: theme.text,
+      fontSize: fs(17),
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      textAlign: 'right',
+      marginTop: 24,
+    },
+    button: {
+      borderRadius: theme.radius,
+      paddingVertical: 15,
+      alignItems: 'center',
+      marginTop: 14,
+    },
+    buttonText: {
+      fontSize: fs(17),
+      fontWeight: '700',
+    },
+    card: {
+      backgroundColor: theme.surface,
+      borderColor: theme.border,
+      borderWidth: 1,
+      borderRadius: theme.radius,
+      padding: theme.space,
+      marginTop: theme.space,
+    },
+  });

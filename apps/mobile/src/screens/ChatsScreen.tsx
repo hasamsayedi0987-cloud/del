@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Modal, Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { api, ApiError } from '../api';
 import { getSocket } from '../socket';
-import { theme } from '../theme';
+import { fs, useTheme, type DelTheme } from '../theme';
 import { Button, Logo, Screen, Subtitle, Title } from '../components/ui';
 import { faError } from '../faError';
 import {
@@ -24,21 +24,29 @@ export function ChatsScreen({
   onOpenChat,
   onOpenProfile,
   onSessionExpired,
+  embedded,
+  onOpenAi,
 }: {
   accessToken: string;
   myUserId: string;
   onOpenChat: (conv: ConversationDto) => void;
   onOpenProfile: () => void;
   onSessionExpired: () => void;
+  /** داخل تب گفتگوهای HomeScreen — هدر جمع‌وجورتر */
+  embedded?: boolean;
+  /** بازکردن دستیار دل (v1.4) */
+  onOpenAi?: () => void;
 }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   const [convs, setConvs] = useState<ConversationDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [newDialog, setNewDialog] = useState(false);
   /** مودال جدید: گفتگوی شخصی یا گروه */
   const [dialogMode, setDialogMode] = useState<'direct' | 'group'>('direct');
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [groupTitle, setGroupTitle] = useState('');
-  const [groupPhones, setGroupPhones] = useState('');
+  const [groupEmails, setGroupEmails] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -158,16 +166,16 @@ export function ChatsScreen({
     setDialogError(null);
     setBusy(true);
     try {
-      const user = await api.findUserByPhone(accessToken, phone.trim());
+      const user = await api.findUserByEmail(accessToken, email.trim().toLowerCase());
       const conv = await api.createConversation(accessToken, user.id);
       setNewDialog(false);
-      setPhone('');
+      setEmail('');
       onOpenChat(conv);
     } catch (e) {
       setDialogError(
         e instanceof ApiError
           ? e.code === 'USER_NOT_FOUND'
-            ? 'کاربری با این شماره در دل نیست'
+            ? 'کاربری با این ایمیل در دل نیست'
             : faError(e)
           : 'خطای غیرمنتظره',
       );
@@ -179,17 +187,17 @@ export function ChatsScreen({
   /** ساخت گروه: عنوان + چند شماره (با کاما/فاصله جدا شده) */
   const createGroup = async () => {
     setDialogError(null);
-    const phones = groupPhones
+    const emails = groupEmails
       .split(/[,،\s]+/)
-      .map((p) => p.trim())
+      .map((e) => e.trim().toLowerCase())
       .filter(Boolean);
-    if (!groupTitle.trim() || phones.length === 0) {
-      setDialogError('عنوان گروه و حداقل یک شماره لازم است');
+    if (!groupTitle.trim() || emails.length === 0) {
+      setDialogError('عنوان گروه و حداقل یک ایمیل لازم است');
       return;
     }
     setBusy(true);
     try {
-      const users = await Promise.all(phones.map((p) => api.findUserByPhone(accessToken, p)));
+      const users = await Promise.all(emails.map((e) => api.findUserByEmail(accessToken, e)));
       const conv = await api.createGroup(
         accessToken,
         groupTitle.trim(),
@@ -197,13 +205,13 @@ export function ChatsScreen({
       );
       setNewDialog(false);
       setGroupTitle('');
-      setGroupPhones('');
+      setGroupEmails('');
       onOpenChat(conv);
     } catch (e) {
       setDialogError(
         e instanceof ApiError
           ? e.code === 'USER_NOT_FOUND'
-            ? 'یکی از شماره‌ها در دل نیست'
+            ? 'یکی از ایمیل‌ها در دل نیست'
             : faError(e)
           : 'خطای غیرمنتظره',
       );
@@ -226,12 +234,19 @@ export function ChatsScreen({
         </TouchableOpacity>
         <Text style={styles.headerTitle}>گفتگوها</Text>
         <View style={styles.headerActions}>
+          {onOpenAi ? (
+            <TouchableOpacity onPress={onOpenAi}>
+              <Text style={styles.headerAction}>🤖</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity onPress={() => openNewDialog('group')}>
             <Text style={styles.headerActionAccent}>+ گروه</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => openNewDialog('direct')}>
-            <Text style={styles.headerActionAccent}>+ جدید</Text>
-          </TouchableOpacity>
+          {!embedded ? (
+            <TouchableOpacity onPress={() => openNewDialog('direct')}>
+              <Text style={styles.headerActionAccent}>+ جدید</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -241,13 +256,10 @@ export function ChatsScreen({
         <>
           {!e2eeActive && !loading ? (
             <TouchableOpacity style={styles.e2eeBanner} onPress={() => { setDialogError(null); setE2eeModal('choose'); }}>
-              <Text style={styles.e2eeBannerIcon}>\ud83d\udd12</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.e2eeBannerTitle}>فعال\u200cسازی رمزنگاری سرتاسری</Text>
-                <Text style={styles.e2eeBannerSub}>
-                  پیام\u200cهای خصوصی فقط روی دستگاه شما و طرف مقابل باز می\u200cشوند
-                </Text>
-              </View>
+              <Text style={styles.e2eeBannerIcon}>🔒</Text>
+              <Text style={styles.e2eeBannerTitle} numberOfLines={1}>
+                فعال‌سازی رمزنگاری سرتاسری ‹
+              </Text>
             </TouchableOpacity>
           ) : null}
           {convs.length === 0 ? (
@@ -301,24 +313,26 @@ export function ChatsScreen({
             {dialogMode === 'direct' ? (
               <>
                 <Title>گفتگوی جدید</Title>
-                <Subtitle>شماره موبایل طرف مقابل را وارد کنید</Subtitle>
+                <Subtitle>ایمیل طرف مقابل را وارد کنید</Subtitle>
                 <TextInput
-                  value={phone}
-                  onChangeText={setPhone}
-                  placeholder="۰۹۱۲ ۱۲۳ ۴۵۶۷"
+                  value={email}
+                  onChangeText={(t) => setEmail(t.trim())}
+                  placeholder="you@example.com"
                   placeholderTextColor={theme.textDim}
-                  keyboardType="phone-pad"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
                   style={styles.modalInput}
                   textAlign="right"
                 />
                 {dialogError ? <Text style={styles.error}>{dialogError}</Text> : null}
-                <Button label="شروع گفتگو" onPress={startChat} busy={busy} disabled={phone.trim().length < 10} />
+                <Button label="شروع گفتگو" onPress={startChat} busy={busy} disabled={!email.includes('@')} />
                 <Button label="انصراف" variant="ghost" onPress={() => setNewDialog(false)} />
               </>
             ) : (
               <>
                 <Title>گروه جدید</Title>
-                <Subtitle>عنوان گروه و شماره اعضا (با کاما یا فاصله) را وارد کنید</Subtitle>
+                <Subtitle>عنوان گروه و ایمیل اعضا (با کاما یا فاصله)</Subtitle>
                 <TextInput
                   value={groupTitle}
                   onChangeText={setGroupTitle}
@@ -328,11 +342,13 @@ export function ChatsScreen({
                   textAlign="right"
                 />
                 <TextInput
-                  value={groupPhones}
-                  onChangeText={setGroupPhones}
-                  placeholder="۰۹۱۲…، ۰۹۱۳…"
+                  value={groupEmails}
+                  onChangeText={setGroupEmails}
+                  placeholder="ali@gmail.com، sara@…"
                   placeholderTextColor={theme.textDim}
-                  keyboardType="phone-pad"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
                   multiline
                   style={[styles.modalInput, { marginTop: 10, minHeight: 72 }]}
                   textAlign="right"
@@ -342,7 +358,7 @@ export function ChatsScreen({
                   label="ساخت گروه"
                   onPress={createGroup}
                   busy={busy}
-                  disabled={!groupTitle.trim() || !groupPhones.trim()}
+                  disabled={!groupTitle.trim() || !groupEmails.trim()}
                 />
                 <Button label="انصراف" variant="ghost" onPress={() => setNewDialog(false)} />
               </>
@@ -425,6 +441,8 @@ export function ChatsScreen({
 }
 
 function GroupAvatar({ title }: { title: string }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   const letter = title.trim().charAt(0) || 'گ';
   return (
     <View style={styles.groupAvatar}>
@@ -434,6 +452,8 @@ function GroupAvatar({ title }: { title: string }) {
 }
 
 function Avatar({ name }: { name: string }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
   const letter = name.trim().charAt(0) || '؟';
   return (
     <View style={styles.avatar}>
@@ -447,14 +467,15 @@ function toFa(n: number): string {
   return String(n).replace(/[0-9]/g, (d) => fa[Number(d)] ?? d);
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: DelTheme) =>
+  StyleSheet.create({
   header: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  headerTitle: { color: theme.text, fontSize: 22, fontWeight: '800' },
+  headerTitle: { color: theme.text, fontSize: fs(22), fontWeight: '800' },
   headerAction: { color: theme.textDim, fontSize: 15, padding: 8 },
   headerActionAccent: { color: theme.accent, fontSize: 15, fontWeight: '700', padding: 8 },
   headerActions: { flexDirection: 'row-reverse', gap: 4, alignItems: 'center' },
@@ -492,7 +513,7 @@ const styles = StyleSheet.create({
   },
   groupAvatarText: { color: theme.accent, fontSize: 20, fontWeight: '800' },
   rowCenter: { flex: 1 },
-  rowName: { color: theme.text, fontSize: 16, fontWeight: '700', textAlign: 'right' },
+  rowName: { color: theme.text, fontSize: fs(16), fontWeight: '700', textAlign: 'right' },
   rowPreview: { color: theme.textDim, fontSize: 13, marginTop: 2, textAlign: 'right' },
   badge: {
     backgroundColor: theme.accentStrong,
@@ -535,17 +556,17 @@ const styles = StyleSheet.create({
   e2eeBanner: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
     borderWidth: 1,
     borderRadius: theme.radius,
-    padding: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
     marginTop: 8,
   },
-  e2eeBannerIcon: { fontSize: 26 },
-  e2eeBannerTitle: { color: theme.text, fontSize: 15, fontWeight: '800', textAlign: 'right' },
-  e2eeBannerSub: { color: theme.textDim, fontSize: 12, marginTop: 2, textAlign: 'right' },
+  e2eeBannerIcon: { fontSize: 15 },
+  e2eeBannerTitle: { color: theme.text, fontSize: 13, fontWeight: '700', textAlign: 'right', flex: 1 },
   recoveryBox: {
     backgroundColor: theme.surface,
     borderColor: theme.accent,

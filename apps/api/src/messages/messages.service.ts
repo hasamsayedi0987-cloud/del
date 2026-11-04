@@ -40,6 +40,7 @@ export function toMessageDto(m: {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+  expiresAt?: Date | null;
   media?: MediaAssetDtoSource | null;
 }): MessageDto {
   return {
@@ -55,6 +56,7 @@ export function toMessageDto(m: {
     createdAt: m.createdAt.toISOString(),
     editedAt: m.editedAt?.toISOString() ?? null,
     deletedAt: m.deletedAt?.toISOString() ?? null,
+    expiresAt: m.expiresAt?.toISOString() ?? null,
   };
 }
 
@@ -204,6 +206,7 @@ export class MessagesService {
       memberCount: isGroup ? conv.participants.length : undefined,
       myRole: isGroup ? (me.role as 'admin' | 'member') : null,
       myAiConsent: me.aiConsent,
+      disappearSec: conv.disappearSec,
       participants: isGroup
         ? conv.participants.map((p) => toParticipantDto(p))
         : undefined,
@@ -258,6 +261,7 @@ export class MessagesService {
           memberCount: isGroup ? conv.participants.length : undefined,
           myRole: isGroup ? (part.role as 'admin' | 'member') : null,
           myAiConsent: part.aiConsent,
+          disappearSec: conv.disappearSec,
           unreadCount,
           lastMessage: conv.messages[0]
             ? {
@@ -356,7 +360,7 @@ export class MessagesService {
     // مسدودسازی (گام ۱۰) — فقط گفتگوی مستقیم؛ گروه‌ها مشمول مسدودسازی دوجانبه نیستند
     const convMeta = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { type: true },
+      select: { type: true, disappearSec: true },
     });
     if (convMeta?.type === 'direct') {
       const peer = await this.prisma.participant.findFirst({
@@ -419,6 +423,10 @@ export class MessagesService {
           type: media ? media.kind : 'text',
           body: text || media?.originalName || '',
           isE2ee,
+          // پیام محوشونده (v1.4) — اگر گفتگو TTL دارد، زمان حذف خودکار بگذار
+          ...(convMeta && convMeta.disappearSec > 0
+            ? { expiresAt: new Date(Date.now() + convMeta.disappearSec * 1000) }
+            : {}),
           ...(media ? { mediaId: media.id } : {}),
         },
         include: { media: { select: MEDIA_SELECT } },
@@ -599,6 +607,21 @@ export class MessagesService {
       lastSeq: conv.lastSeq,
       lastMessageAt: conv.lastMessageAt?.toISOString() ?? null,
     });
+    return this.getOne(meId, conversationId);
+  }
+
+  /** پیام‌های محوشونده (v1.4) — تنظیم TTL گفتگو؛ همه اعضا مجازند */
+  async setDisappearSec(meId: string, conversationId: string, disappearSec: number): Promise<ConversationDto> {
+    await this.requireParticipant(meId, conversationId);
+    const allowed = [0, 3600, 86400, 604800, 2592000];
+    if (!allowed.includes(disappearSec)) {
+      throw httpError(400, 'INVALID_DISAPPEAR', 'مقدار مجاز: 0، 3600، 86400، 604800، 2592000');
+    }
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { disappearSec },
+    });
+    this.events.emit('conversation.updated', { conversationId });
     return this.getOne(meId, conversationId);
   }
 

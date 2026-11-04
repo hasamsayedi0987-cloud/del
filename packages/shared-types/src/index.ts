@@ -85,6 +85,8 @@ export interface MessageDto {
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
+  /** پیام محوشونده (v1.4) — زمان حذف خودکار از سرور */
+  expiresAt?: string | null;
 }
 
 export interface ParticipantDto {
@@ -117,6 +119,8 @@ export interface ConversationDto {
   lastMessage: { body: string; createdAt: string; senderId: string } | null;
   /** رضایت هوش مصنوعی من در این گفتگو (گام ۹) — null = تبعیت از رضایت کلی */
   myAiConsent?: boolean | null;
+  /** پیام‌های محوشونده (v1.4) — 0 = خاموش، وگرنه TTL به ثانیه */
+  disappearSec?: number;
 }
 
 /** پیام broadcast سرور به کلاینت‌های عضو مکالمه (رویداد message.new) */
@@ -414,7 +418,7 @@ export interface E2eeBackup {
 
 // ————— هوش مصنوعی (گام ۹) —————
 
-export type AiFeature = 'translate' | 'fix' | 'suggest' | 'summarize';
+export type AiFeature = 'translate' | 'fix' | 'suggest' | 'summarize' | 'chat';
 
 export type AiProviderName = 'mock' | 'openai' | 'webhook';
 
@@ -449,6 +453,40 @@ export interface AiUsageReport {
   /** جمع کاراکتر ورودی/خروجی برای برآورد هزینه */
   charsIn: number;
   charsOut: number;
+}
+
+// ————— استوری‌ها (v1.4) —————
+
+export type StoryKind = 'text' | 'image';
+
+/** کلیدهای پس‌زمینهٔ استوری متنی — در دو اپ موبایل/دسکتاپ همان پالت است */
+export type StoryBgKey = 'aurora' | 'sunset' | 'ocean' | 'forest' | 'night' | 'bloom';
+
+export interface StoryDto {
+  id: string;
+  userId: string;
+  /** نام نمایشی سازنده — برای نمایش سرِ حلقه‌ها */
+  userName: string | null;
+  kind: StoryKind;
+  text: string | null;
+  bgKey: StoryBgKey | string;
+  textColor: string;
+  /** استوری تصویری است؟ بایت تصویر با GET /stories/:id/media گرفته می‌شود */
+  hasMedia: boolean;
+  createdAt: string;
+  /** ثانیه تا انقضا */
+  expiresInSeconds: number;
+  viewCount: number;
+  /** من این استوری را دیده‌ام؟ */
+  seen: boolean;
+}
+
+/** پاسخ GET /stories — استوری‌های هر کاربر در یک گروه */
+export interface StoryGroupDto {
+  userId: string;
+  userName: string | null;
+  hasNew: boolean;
+  stories: StoryDto[];
 }
 
 /** پاسخ GET /ai/status — وضعیت قابلیت AI برای این کاربر */

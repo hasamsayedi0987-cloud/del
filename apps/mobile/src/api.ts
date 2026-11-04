@@ -22,6 +22,8 @@ import type {
   PushTokenResponse,
   ReportDto,
   RequestOtpResponse,
+  StoryDto,
+  StoryGroupDto,
   SyncBootstrap,
   SyncUpdates,
   UserDto,
@@ -37,6 +39,13 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/** تبدیل مسیر نسبی سرور (آواتار/رسانه) به آدرس مطلق برای Image */
+export function absoluteUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  return `${getApiBaseUrl()}${path}`;
 }
 
 async function request<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
@@ -115,6 +124,53 @@ export const api = {
       `/users/by-phone/${encodeURIComponent(phone)}`,
       { token },
     ),
+
+  /** یافتن کاربر با ایمیل — جست‌وجوی اصلی اپ (v1.4) */
+  findUserByEmail: (token: string, email: string) =>
+    request<{ id: string; displayName: string | null; email: string }>(
+      `/users/by-email/${encodeURIComponent(email)}`,
+      { token },
+    ),
+
+  /** آپلود عکس پروفایل — jpeg base64 (≤512KB) */
+  uploadAvatar: (token: string, imageDataBase64: string, mime = 'image/jpeg') =>
+    request<UserDto>('/users/me/avatar', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ imageData: imageDataBase64, mime }),
+    }),
+
+  removeAvatar: (token: string) =>
+    request<UserDto>('/users/me/avatar', { method: 'DELETE', token }),
+
+  /** پیام‌های محوشونده — TTL گفتگو (v1.4) */
+  setDisappear: (token: string, conversationId: string, disappearSec: number) =>
+    request<ConversationDto>(`/conversations/${conversationId}`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ disappearSec }),
+    }),
+
+  // ————— استوری‌ها (v1.4) —————
+
+  createStory: (token: string, input: { kind: 'text' | 'image'; text?: string; bgKey?: string; imageData?: string }) =>
+    request<StoryDto>('/stories', { method: 'POST', token, body: JSON.stringify(input) }),
+
+  listStories: (token: string) => request<{ groups: StoryGroupDto[] }>('/stories', { token }),
+
+  viewStory: (token: string, storyId: string) =>
+    request<{ ok: true }>(`/stories/${storyId}/view`, { method: 'POST', token }),
+
+  deleteStory: (token: string, storyId: string) =>
+    request<{ ok: true }>(`/stories/${storyId}`, { method: 'DELETE', token }),
+
+  /** گفتگو با دستیار دل — تاریخچه محلیِ کلاینت برای زمینه می‌رود */
+  aiChat: (token: string, text: string, history: string[]) =>
+    request<AiTextResult>('/ai/chat', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ text, history }),
+    }),
 
   createConversation: (token: string, userId: string) =>
     request<ConversationDto>('/conversations', {
