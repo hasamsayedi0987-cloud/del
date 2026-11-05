@@ -124,7 +124,7 @@ android {
             signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
-            minifyEnabled true // v1.4: R8 — dex از ۱۸MB به‌مراتب کوچک‌تر می‌شود
+            minifyEnabled enableMinifyInReleaseBuilds // v1.4: R8 خاموش — رم ۴GB؛ کاهش حجم از حذف ABIها
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
