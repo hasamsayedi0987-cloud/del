@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,9 +16,10 @@ export function Screen({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
   return (
+    // padding روی اندروید هم لازم است — edge-to-edge (SDK 35) پنجره را resize نمی‌کند
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
     >
       <ScrollView
         style={styles.flex}

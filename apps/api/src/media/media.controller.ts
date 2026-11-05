@@ -11,11 +11,11 @@ import { CompleteDto, MediaUrlQuery, PresignDto } from './dto/media.dto';
 export class MediaController {
   constructor(private readonly media: MediaService) {}
 
-  /** صدور URL امضاشده آپلود — بایت‌ها مستقیم به S3 می‌روند، نه از API */
+  /** صدور URL امضاشده آپلود — بایت‌ها مستقیم به S3 می‌روند؛ بدون S3 به خود API (حالت لوکال) */
   @Post('presign')
   @HttpCode(200)
   presign(@Req() req: AuthedRequest, @Body() dto: PresignDto) {
-    return this.media.presign(req.user.sub, dto);
+    return this.media.presign(req.user.sub, dto, this.media.publicBaseOf(req));
   }
 
   /** تأیید نهایی آپلود — magic bytes و قواعد سرور اینجا چک می‌شود */
@@ -38,6 +38,6 @@ export class MediaController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() q: MediaUrlQuery,
   ) {
-    return this.media.getUrl(req.user.sub, id, q.variant ?? 'original');
+    return this.media.getUrl(req.user.sub, id, q.variant ?? 'original', this.media.publicBaseOf(req));
   }
 }

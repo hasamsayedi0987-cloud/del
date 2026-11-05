@@ -3,6 +3,7 @@ import { Alert, FlatList, Modal, Text, TextInput, TouchableOpacity, View, StyleS
 import { api, ApiError } from '../api';
 import { getSocket } from '../socket';
 import { fs, useTheme, type DelTheme } from '../theme';
+import { loadConvs, saveConvs } from '../cache';
 import { Button, Logo, Screen, Subtitle, Title } from '../components/ui';
 import { faError } from '../faError';
 import {
@@ -116,7 +117,9 @@ export function ChatsScreen({
     try {
       const list = await api.listConversations(accessToken);
       setConvs(list);
+      void saveConvs(list); // کش آفلاین برای بار بعدی بدون اینترنت
     } catch (e) {
+      // آفلاین: لیست کش‌شده همان نمایش داده می‌شود — خروج فقط با ۴۰۱ واقعی
       if (e instanceof ApiError && e.status === 401) onSessionExpired();
     } finally {
       setLoading(false);
@@ -124,6 +127,13 @@ export function ChatsScreen({
   }, [accessToken, onSessionExpired]);
 
   useEffect(() => {
+    // نمایش فوری کش آفلاین قبل از پاسخ شبکه
+    void loadConvs().then((cached) => {
+      if (cached?.length) {
+        setConvs((prev) => (prev.length ? prev : cached));
+        setLoading(false);
+      }
+    });
     void refresh();
     // به‌روزرسانی زنده لیست وقتی پیام جدید در مکالمه‌ای دیگر می‌آید
     const s = getSocket();

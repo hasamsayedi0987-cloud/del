@@ -27,6 +27,8 @@ async function bootstrap(): Promise<void> {
   });
 
   app.setGlobalPrefix('api/v1');
+  // پشت پروکسی Render — req.protocol برای ساخت URLهای امضاشدهٔ حالت لوکال رسانه درست شود
+  app.set('trust proxy', 1);
   app.use(securityHeaders);
   app.enableCors({
     // پروداکشن: مبداها با DEL_CORS_ORIGINS (کاما بین آدرس‌ها) محدود می‌شوند — پیش‌فرض بسته

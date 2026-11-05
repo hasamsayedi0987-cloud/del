@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StatusBar, View, Text, StyleSheet, ActivityIndicator, Alert, AppState } from 'react-native';
+import {
+  BackHandler,
+  StatusBar,
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  AppState,
+} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from './src/api';
 import { loadApiBaseUrl } from './src/config';
@@ -66,6 +75,24 @@ export default function App() {
     routeRef.current = route;
   }, [route]);
   const convCacheRef = useRef<Map<string, ConversationDto>>(new Map());
+
+  // ————— دکمهٔ بازگشت سخت‌افزاری اندروید — پاپ مسیر به‌جای خروج از اپ —————
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (callStateRef.current) return true; // وسط تماس — ناوبری ممنوع
+      const r = routeRef.current;
+      if (r.name === 'chat' || r.name === 'profile' || r.name === 'name' || r.name === 'ai-chat') {
+        setRoute({ name: 'chats' });
+        return true;
+      }
+      if (r.name === 'login-otp') {
+        setRoute({ name: 'login-email' });
+        return true;
+      }
+      return false; // گفتگوها/ورود/بوت — رفتار پیش‌فرض سیستم
+    });
+    return () => sub.remove();
+  }, []);
 
   /** بوت‌استرپ — همه گفتگوها یک‌جا؛ برای عنوان اعلان و ناوبری تپ */
   const refreshConvCache = useCallback(async (token: string) => {

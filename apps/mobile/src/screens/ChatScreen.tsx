@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
-  Platform,
   ScrollView,
   Text,
   TextInput,
@@ -20,6 +19,7 @@ import { getSignedUrl, uploadMedia } from '../media';
 import { getSocket, uuid } from '../socket';
 import { fs, getThemeSettings, useTheme, wallpaperSource, type DelTheme, type WallpaperKey } from '../theme';
 import { ImageBackground } from 'react-native';
+import { loadMessages, saveMessages } from '../cache';
 import {
   decryptDirect,
   encryptDirect,
@@ -191,6 +191,18 @@ export function ChatScreen({
     );
   }, [blockedPeer, conversation.peer, toggleBlockPeer]);
 
+  /** دکمه‌های تماس در همهٔ چت‌ها — گروه فعلاً پشتیبانی نمی‌شود و پیام شفاف می‌دهد */
+  const requestCall = useCallback(
+    (kind: 'audio' | 'video') => {
+      if (isGroup) {
+        Alert.alert('تماس', 'فعلاً تماس صوتی/تصویری فقط در گفتگوهای دو\u200cنفره ممکن است.');
+        return;
+      }
+      onRequestCall?.(conversation, kind);
+    },
+    [isGroup, onRequestCall, conversation],
+  );
+
   // ————— گام ۹: هوش مصنوعی (ترجمه/پیشنهاد/خلاصه با رضایت opt-in) —————
   const [aiBusy, setAiBusy] = useState(false);
   const [aiChips, setAiChips] = useState<string[]>([]);
@@ -234,6 +246,14 @@ export function ChatScreen({
 
   const convId = conversation.id;
 
+  // ————— کش آفلاین — هر تغییر پیام‌ها (با تأخیر) روی دیسک ذخیره می‌شود —————
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void saveMessages(convId, messagesRef.current);
+    }, 800);
+    return () => clearTimeout(t);
+  }, [messages, convId]);
+
   /** افزودن/به‌روزرسانی پیام با dedupe روی clientMsgId */
   const upsert = useCallback((msg: LocalMsg) => {
     setMessages((prev) => {
@@ -250,6 +270,12 @@ export function ChatScreen({
     let cancelled = false;
 
     (async () => {
+      // ۱) نمایش فوری از کش آفلاین — حتی با اینترنت قطع
+      const cached = await loadMessages(convId);
+      if (!cancelled && cached && messagesRef.current.length === 0) {
+        setMessages(cached as LocalMsg[]);
+      }
+      // ۲) تازه‌سازی از سرور — پیام‌های رمز به ترتیب صعودی باز می‌شوند (ratchet ترتیب‌مند است)
       try {
         const page = await api.getMessages(accessToken, convId);
         if (cancelled) return;
@@ -664,9 +690,11 @@ export function ChatScreen({
   }, [accessToken, convId, runAi]);
 
   const body = (
+    // padding روی اندروید هم لازم است — edge-to-edge (SDK 35) پنجره را resize نمی‌کند
+    // و کیبورد روی کادر تایپ می‌افتد (باگ اسکرین‌شات)
     <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[styles.root, wallSrc ? { backgroundColor: 'transparent' } : null]}
+      behavior="padding"
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}>
@@ -700,36 +728,32 @@ export function ChatScreen({
                       : ' '}
           </Text>
         </View>
-        {/* گام ۶: دکمه‌های تماس + گام ۱۰: منوی گزینه‌ها — فقط گفتگوهای ۱:۱ */}
-        {!isGroup ? (
-          <View style={styles.callBtns}>
-            {onRequestCall ? (
-              <>
-                <TouchableOpacity
-                  style={styles.callBtn}
-                  onPress={() => onRequestCall(conversation, 'audio')}
-                  accessibilityLabel="تماس صوتی"
-                >
-                  <Text style={styles.callBtnIcon}>📞</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.callBtn}
-                  onPress={() => onRequestCall(conversation, 'video')}
-                  accessibilityLabel="تماس تصویری"
-                >
-                  <Text style={styles.callBtnIcon}>🎥</Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
-            <TouchableOpacity
-              style={styles.callBtn}
-              onPress={() => setDisappearDialog(true)}
-              accessibilityLabel="پیام محوشونده"
-            >
-              <Text style={[styles.callBtnIcon, disappearSec > 0 ? styles.disappearOn : null]}>
-                ⏲
-              </Text>
-            </TouchableOpacity>
+        {/* دکمه‌های تماس در همهٔ گفتگوها + ⏲ محوشونده + منو در ۱:۱ */}
+        <View style={styles.callBtns}>
+          <TouchableOpacity
+            style={styles.callBtn}
+            onPress={() => requestCall('audio')}
+            accessibilityLabel="تماس صوتی"
+          >
+            <Text style={styles.callBtnIcon}>📞</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.callBtn}
+            onPress={() => requestCall('video')}
+            accessibilityLabel="تماس تصویری"
+          >
+            <Text style={styles.callBtnIcon}>🎥</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.callBtn}
+            onPress={() => setDisappearDialog(true)}
+            accessibilityLabel="پیام محوشونده"
+          >
+            <Text style={[styles.callBtnIcon, disappearSec > 0 ? styles.disappearOn : null]}>
+              ⏲
+            </Text>
+          </TouchableOpacity>
+          {!isGroup ? (
             <TouchableOpacity
               style={styles.callBtn}
               onPress={openPeerMenu}
@@ -737,16 +761,8 @@ export function ChatScreen({
             >
               <Text style={styles.callBtnIcon}>⋯</Text>
             </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.callBtn}
-            onPress={() => setDisappearDialog(true)}
-            accessibilityLabel="پیام محوشونده"
-          >
-            <Text style={[styles.callBtnIcon, disappearSec > 0 ? styles.disappearOn : null]}>⏲</Text>
-          </TouchableOpacity>
-        )}
+          ) : null}
+        </View>
       </View>
 
       {hasMore ? (
@@ -781,7 +797,11 @@ export function ChatScreen({
                 {item.media ? (
                   <MediaBubble token={accessToken} media={item.media} mine={mine} />
                 ) : null}
-                {item.body ? <Text style={styles.bubbleText}>{item.body}</Text> : null}
+                {item.body ? (
+                  <Text style={mine ? styles.bubbleTextMine : styles.bubbleTextPeer}>
+                    {item.body}
+                  </Text>
+                ) : null}
                 {aiAble ? <Text style={styles.aiHint}>نگه‌دارید: ترجمه ✨</Text> : null}
                 {mine && item.status === 'sending' ? (
                   <Text style={styles.status}>{item.pendingLabel ?? '… در حال ارسال'}</Text>
@@ -1050,11 +1070,13 @@ const makeStyles = (theme: DelTheme) =>
     borderColor: theme.border,
     borderTopLeftRadius: 4,
   },
-  bubbleText: { color: '#EAF6FF', fontSize: 16, lineHeight: 24, textAlign: 'right' },
-  senderName: { color: theme.accent, fontSize: 12, fontWeight: '700', marginBottom: 2, textAlign: 'right' },
-  status: { color: 'rgba(4,18,31,0.55)', fontSize: 11, marginTop: 2, textAlign: 'left' },
-  statusFailed: { color: '#7f1d1d', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
-  ticks: { color: 'rgba(4,18,31,0.6)', fontSize: 11, marginTop: 2, textAlign: 'left', fontWeight: '700' },
+  // متن هر حباب از پالت تم می‌آید — ثابتِ روشن روی حبابِ روشن، متن دریافتی را ناخوانا می‌کرد
+  bubbleTextMine: { color: theme.bubbleMeText, fontSize: fs(16), lineHeight: fs(24), textAlign: 'right' },
+  bubbleTextPeer: { color: theme.text, fontSize: fs(16), lineHeight: fs(24), textAlign: 'right' },
+  senderName: { color: theme.accent, fontSize: fs(12), fontWeight: '700', marginBottom: 2, textAlign: 'right' },
+  status: { color: theme.dark ? 'rgba(234,246,255,0.65)' : 'rgba(4,18,31,0.55)', fontSize: fs(11), marginTop: 2, textAlign: 'left' },
+  statusFailed: { color: theme.danger, fontSize: fs(11), marginTop: 2, textAlign: 'left', fontWeight: '700' },
+  ticks: { color: theme.dark ? 'rgba(234,246,255,0.7)' : 'rgba(4,18,31,0.6)', fontSize: fs(11), marginTop: 2, textAlign: 'left', fontWeight: '700' },
   // ————— گام ۹: هوش مصنوعی —————
   aiHint: { color: theme.textDim, fontSize: 10, marginTop: 3, textAlign: 'left' },
   aiBar: {

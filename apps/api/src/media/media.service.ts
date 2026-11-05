@@ -6,6 +6,11 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -120,6 +125,9 @@ export class MediaService implements OnModuleDestroy {
   private readonly logger = new Logger(MediaService.name);
   private cfg: AppConfig;
   private s3: S3Client | null = null;
+  /** حالت لوکال — بدون S3؛ فایل روی دیسک سرور ذخیره و با URL امضاشده سرو می‌شود */
+  localMode = false;
+  private localDir = '';
 
   constructor(
     private readonly config: ConfigService<AppConfig, true>,
@@ -142,16 +150,79 @@ export class MediaService implements OnModuleDestroy {
         },
       });
       this.logger.log(`S3 ready → ${this.cfg.s3Endpoint} bucket=${this.cfg.s3Bucket}`);
-    } else {
-      this.logger.warn('Media storage NOT configured — S3_* env missing؛ endpointهای رسانه 503 می‌دهند');
+      return;
+    }
+    // fallback لوکال — آپلود کار می‌کند حتی بدون S3 (دیسک موقت روی Render: تا دپلوی بعدی)
+    this.localMode = true;
+    this.localDir = process.env.MEDIA_LOCAL_DIR?.trim() || path.join(os.tmpdir(), 'del-media');
+    fs.mkdirSync(this.localDir, { recursive: true });
+    this.logger.warn(
+      `S3_* env missing — LOCAL media storage at ${this.localDir} (files are temporary on ephemeral hosts)`,
+    );
+  }
+
+  /** امضای HMAC مشترک URLهای آپلود/دانلود حالت لوکال */
+  private localSig(payload: string): string {
+    return createHmac('sha256', this.cfg.jwtAccessSecret).update(payload).digest('hex');
+  }
+
+  /** توکن PUT آپلود لوکال — ۱۵ دقیقه اعتبار مثل presign */
+  uploadToken(mediaId: string): { expires: number; sig: string } {
+    const expires = Math.floor(Date.now() / 1000) + 15 * 60;
+    return { expires, sig: this.localSig(`up:${mediaId}:${expires}`) };
+  }
+
+  assertUploadToken(mediaId: string, expires: string | undefined, sig: string | undefined): void {
+    const exp = Number(expires);
+    if (!Number.isFinite(exp) || exp * 1000 < Date.now() || !sig) {
+      throw httpError(403, 'MEDIA_URL_EXPIRED', 'Upload URL is expired or invalid');
+    }
+    const expect = this.localSig(`up:${mediaId}:${exp}`);
+    if (
+      sig.length !== expect.length ||
+      !timingSafeEqual(Buffer.from(sig), Buffer.from(expect))
+    ) {
+      throw httpError(403, 'MEDIA_URL_INVALID', 'Upload URL signature mismatch');
     }
   }
 
-  private mustStorage(): S3Client {
-    if (!this.s3) {
+  assertDownloadToken(
+    mediaId: string,
+    variant: string,
+    expires: string | undefined,
+    sig: string | undefined,
+  ): void {
+    const exp = Number(expires);
+    if (!Number.isFinite(exp) || exp * 1000 < Date.now() || !sig) {
+      throw httpError(403, 'MEDIA_URL_EXPIRED', 'Media URL is expired');
+    }
+    const expect = this.localSig(`dl:${mediaId}:${variant}:${exp}`);
+    if (
+      sig.length !== expect.length ||
+      !timingSafeEqual(Buffer.from(sig), Buffer.from(expect))
+    ) {
+      throw httpError(403, 'MEDIA_URL_INVALID', 'Media URL signature mismatch');
+    }
+  }
+
+  /** مسیر فایل لوکال روی دیسک — کلید DB استفاده می‌شود تا کلاینت چیزی نفهمد */
+  localPath(storageKey: string): string {
+    const safe = storageKey.replace(/[^a-zA-Z0-9/_.-]/g, '');
+    return path.join(this.localDir, safe);
+  }
+
+  /** پایهٔ URL برای لینک‌های لوکال — env بُرنده است، وگرنه از درخواست ساخته می‌شود */
+  publicBaseOf(req: { protocol?: string; headers: Record<string, string | string[] | undefined> }): string {
+    if (this.cfg.mediaLocalPublicBase) return this.cfg.mediaLocalPublicBase.replace(/\/+$/, '');
+    const proto = String(req.protocol ?? 'http');
+    const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost');
+    return `${proto}://${host}`;
+  }
+
+  private assertStorage(): void {
+    if (!this.localMode && !this.s3) {
       throw httpError(503, 'MEDIA_NOT_CONFIGURED', 'Media storage is not configured on the server');
     }
-    return this.s3;
   }
 
   private async requireParticipant(meId: string, conversationId: string) {
@@ -176,8 +247,9 @@ export class MediaService implements OnModuleDestroy {
       width?: number;
       height?: number;
     },
+    publicBase?: string,
   ): Promise<PresignResponse> {
-    const s3 = this.mustStorage();
+    this.assertStorage();
     await this.requireParticipant(meId, input.conversationId);
 
     const mime = input.mime.toLowerCase().trim();
@@ -210,6 +282,19 @@ export class MediaService implements OnModuleDestroy {
 
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     this.logger.log(`presign ${asset.kind} ${input.size}B → ${asset.id}`);
+
+    // ————— حالت لوکال (بدون S3): PUT به خود API؛ حجم‌های بزرگ هم تک‌مرحله‌ای —————
+    if (this.localMode) {
+      const { expires, sig } = this.uploadToken(asset.id);
+      const base = (publicBase ?? '').replace(/\/+$/, '');
+      return {
+        mediaId: asset.id,
+        mode: 'single',
+        url: `${base}/api/v1/media/local/${asset.id}/upload?expires=${expires}&sig=${sig}`,
+        expiresAt,
+      };
+    }
+    const s3 = this.s3!;
 
     // فایل بزرگ — آپلود multipart با ازسرگیری (docs: >۱۰MB)
     if (input.size > this.cfg.mediaMultipartThresholdBytes) {
@@ -265,7 +350,7 @@ export class MediaService implements OnModuleDestroy {
     meId: string,
     input: { mediaId: string; parts?: { partNumber: number; etag: string }[] },
   ): Promise<MediaAssetDto> {
-    const s3 = this.mustStorage();
+    this.assertStorage();
     const asset = await this.prisma.mediaAsset.findUnique({ where: { id: input.mediaId } });
     if (!asset) throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
     if (asset.ownerId !== meId) {
@@ -275,6 +360,8 @@ export class MediaService implements OnModuleDestroy {
     if (asset.status === 'rejected') {
       throw httpError(400, 'MEDIA_REJECTED', asset.error ?? 'Upload was rejected earlier');
     }
+    if (this.localMode) return this.completeLocal(asset);
+    const s3 = this.s3!;
 
     try {
       // multipart — نهایی‌سازی پارت‌ها (uploadId از DB)
@@ -347,12 +434,143 @@ export class MediaService implements OnModuleDestroy {
     }
   }
 
+  /** complete در حالت لوکال — همان قواعد S3: اندازه + magic bytes + بندانگشتی */
+  private async completeLocal(asset: MediaRow): Promise<MediaAssetDto> {
+    const filePath = this.localPath(asset.storageKey);
+    try {
+      const st = await fsp.stat(filePath).catch(() => null);
+      if (!st) {
+        throw httpError(400, 'MEDIA_NOT_UPLOADED', 'File bytes never reached the server — retry the upload');
+      }
+      if (st.size !== asset.size) {
+        throw httpError(
+          400,
+          'MEDIA_SIZE_MISMATCH',
+          `Uploaded ${st.size}B but declared ${asset.size}B — upload the exact file`,
+        );
+      }
+
+      // magic bytes — ۲۶ بایت اول کافی است
+      const fh = await fsp.open(filePath, 'r');
+      const headBuf = Buffer.alloc(Math.min(26, st.size));
+      await fh.read(headBuf, 0, headBuf.length, 0);
+      await fh.close();
+      const magic = detectMagic(new Uint8Array(headBuf));
+      const opaque = asset.kind === 'file' && !['application/pdf', 'application/zip'].includes(asset.mime);
+      if (!magic) {
+        if (!opaque) {
+          throw httpError(400, 'MAGIC_MISMATCH', `Content does not look like ${asset.mime}`);
+        }
+      } else if (!magicCompatible(asset.mime, magic)) {
+        throw httpError(400, 'MAGIC_MISMATCH', `Content is ${magic} but declared ${asset.mime}`);
+      }
+
+      let thumbKey: string | null = null;
+      if (asset.kind === 'image') {
+        thumbKey = await this.makeThumbLocal(filePath, asset.storageKey);
+      }
+
+      const updated = await this.prisma.mediaAsset.update({
+        where: { id: asset.id },
+        data: { status: 'ready', thumbKey, readyAt: new Date(), error: null },
+      });
+      this.logger.log(`media ready(local) ${asset.id} (${asset.kind}, ${st.size}B, thumb=${Boolean(thumbKey)})`);
+      this.events.emit('media.ready', { conversationId: asset.conversationId, media: toMediaDto(updated) });
+      return toMediaDto(updated);
+    } catch (e) {
+      if (e instanceof HttpException) {
+        await this.reject(asset.id, asset.storageKey, (e.getResponse() as { error?: { code?: string } })?.error?.code ?? 'MEDIA_REJECTED');
+      }
+      throw e;
+    }
+  }
+
+  /** بندانگشتی لوکال با sharp — در نبود sharp بی‌صدا رد می‌شود */
+  private async makeThumbLocal(filePath: string, storageKey: string): Promise<string | null> {
+    try {
+      const sharp = (await import('sharp')).default;
+      const bytes = await fsp.readFile(filePath);
+      const thumb = await sharp(bytes)
+        .rotate()
+        .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      const meta = await sharp(bytes).metadata();
+      const thumbKey = `${storageKey}.thumb.jpg`;
+      await fsp.writeFile(this.localPath(thumbKey), thumb);
+      if (meta.width && meta.height) {
+        await this.prisma.mediaAsset.update({
+          where: { storageKey },
+          data: { width: meta.width, height: meta.height },
+        });
+      }
+      return thumbKey;
+    } catch (e) {
+      this.logger.warn(`thumbnail skipped: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  /** PUT بایت‌های آپلود لوکال — استریم مستقیم به دیسک با سقف حجم */
+  async writeLocalUpload(mediaId: string, stream: import('node:stream').Readable): Promise<void> {
+    const asset = await this.prisma.mediaAsset.findUnique({ where: { id: mediaId } });
+    if (!asset) throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
+    if (asset.status !== 'pending') {
+      throw httpError(400, 'BAD_UPLOAD', 'This asset can no longer accept bytes');
+    }
+    const limit = asset.kind === 'image' ? this.cfg.mediaMaxImageBytes : this.cfg.mediaMaxFileBytes;
+    const filePath = this.localPath(asset.storageKey);
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+
+    let total = 0;
+    await new Promise<void>((resolve, reject) => {
+      const out = fs.createWriteStream(filePath);
+      stream.on('data', (chunk: Buffer | string) => {
+        total += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+        if (total > limit) {
+          stream.destroy();
+          out.destroy();
+          fsp.rm(filePath, { force: true }).catch(() => undefined);
+          reject(httpError(413, 'MEDIA_TOO_LARGE', 'Stream exceeded the size limit'));
+        }
+      });
+      stream.on('error', reject);
+      out.on('error', reject);
+      out.on('finish', () => resolve());
+      stream.pipe(out);
+    });
+    this.logger.log(`local upload received ${mediaId} (${total}B)`);
+  }
+
+  /** فایل لوکال برای دانلود — پس از تأیید امضا؛ فقط asset آماده */
+  async localFileForDownload(
+    mediaId: string,
+    variant: string,
+  ): Promise<{ filePath: string; mime: string; name: string | null }> {
+    const asset = await this.prisma.mediaAsset.findUnique({ where: { id: mediaId } });
+    if (!asset || asset.status !== 'ready') {
+      throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
+    }
+    const key = variant === 'thumb' ? (asset.thumbKey ?? asset.storageKey) : asset.storageKey;
+    return {
+      filePath: this.localPath(key),
+      mime: variant === 'thumb' ? 'image/jpeg' : asset.mime,
+      name: asset.originalName,
+    };
+  }
+
   /** علامت رد + پاکسازی آبجکت — امنیت: محتوای نامعتبر هرگز ready نمی‌شود */
   private async reject(mediaId: string, storageKey: string, code: string): Promise<void> {
     const row = await this.prisma.mediaAsset
       .update({ where: { id: mediaId }, data: { status: 'rejected', error: code } })
       .catch(() => null);
-    if (!this.s3 || !row) return;
+    if (!row) return;
+    if (this.localMode) {
+      await fsp.rm(this.localPath(storageKey), { force: true }).catch(() => undefined);
+      await fsp.rm(`${this.localPath(storageKey)}.thumb.jpg`, { force: true }).catch(() => undefined);
+      return;
+    }
+    if (!this.s3) return;
     if (row.uploadId) {
       await this.s3
         .send(new AbortMultipartUploadCommand({ Bucket: this.cfg.s3Bucket, Key: storageKey, UploadId: row.uploadId }))
@@ -424,8 +642,9 @@ export class MediaService implements OnModuleDestroy {
     meId: string,
     mediaId: string,
     variant: 'thumb' | 'original' = 'original',
+    publicBase?: string,
   ): Promise<{ url: string; expiresAt: string; kind: string; mime: string; size: number; originalName: string | null }> {
-    this.mustStorage();
+    this.assertStorage();
     const asset = await this.getAssetChecked(meId, mediaId);
     if (asset.status !== 'ready') {
       throw httpError(400, 'MEDIA_NOT_READY', 'Upload is not completed yet');
@@ -433,6 +652,22 @@ export class MediaService implements OnModuleDestroy {
     if (variant === 'thumb' && !asset.thumbKey) {
       throw httpError(404, 'THUMB_NOT_AVAILABLE', 'This asset has no thumbnail');
     }
+
+    // حالت لوکال — URL امضاشده به خود API
+    if (this.localMode) {
+      const expires = Math.floor(Date.now() / 1000) + this.cfg.mediaSignedUrlTtlSec;
+      const sig = this.localSig(`dl:${asset.id}:${variant}:${expires}`);
+      const base = (publicBase ?? '').replace(/\/+$/, '');
+      return {
+        url: `${base}/api/v1/media/local/${asset.id}?variant=${variant}&expires=${expires}&sig=${sig}`,
+        expiresAt: new Date(expires * 1000).toISOString(),
+        kind: asset.kind,
+        mime: variant === 'thumb' ? 'image/jpeg' : asset.mime,
+        size: asset.size,
+        originalName: asset.originalName,
+      };
+    }
+
     const key = variant === 'thumb' && asset.thumbKey ? asset.thumbKey : asset.storageKey;
     const url = await getSignedUrl(
       this.s3!,

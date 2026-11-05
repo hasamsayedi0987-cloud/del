@@ -62,6 +62,8 @@ export interface AppConfig {
   mediaMaxFileBytes: number;
   /** آیا پیکربندی storage رسانه کامل است؟ */
   mediaConfigured: boolean;
+  /** پایهٔ URL عمومی برای حالت لوکال رسانه (بدون S3) — مثل https://del-messenger-api.onrender.com */
+  mediaLocalPublicBase: string | undefined;
   // ————— تماس‌ها (گام ۶) — LiveKit SFU —————
   /** آدرس WebSocket سرور LiveKit که به کلاینت‌ها داده می‌شود (wss://… یا ws://…) */
   livekitUrl: string | undefined;
@@ -154,6 +156,7 @@ export const appConfig = {
       mediaMaxImageBytes: Number(env.MEDIA_MAX_IMAGE_MB ?? 25) * 1024 * 1024,
       mediaMaxFileBytes: Number(env.MEDIA_MAX_FILE_MB ?? 1024) * 1024 * 1024,
       mediaConfigured: Boolean(env.S3_ENDPOINT && env.S3_ACCESS_KEY && env.S3_SECRET_KEY),
+      mediaLocalPublicBase: env.MEDIA_LOCAL_PUBLIC_BASE?.trim() || undefined,
       livekitUrl: env.LIVEKIT_URL,
       livekitApiKey: env.LIVEKIT_API_KEY,
       livekitApiSecret: env.LIVEKIT_API_SECRET,
