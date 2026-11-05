@@ -14,6 +14,8 @@ function getTransport(): Transporter | null {
   const cfg = appConfig.load();
   if (!cfg.emailSmtpConfigured) return null;
   if (transporter) return transporter;
+  // timeoutهای سخت‌گیرانه — بدون این‌ها nodemailer تا ۲ دقیقه (اتصال) و ۱۰ دقیقه
+  // (سوکت) منتظر می‌ماند و درخواست ورود روی سرور معلق می‌شود (باگ دپلوی ۱۴۰۴/۱۱/۰۵)
   transporter = nodemailer.createTransport({
     host: cfg.smtpHost,
     port: cfg.smtpPort,
@@ -21,7 +23,13 @@ function getTransport(): Transporter | null {
     auth: cfg.smtpUser
       ? { user: cfg.smtpUser, pass: cfg.smtpPass ?? '' }
       : undefined,
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 15_000,
   });
+  new Logger('Mailer').log(
+    `SMTP transport ready → ${cfg.smtpHost}:${cfg.smtpPort} (secure=${cfg.smtpPort === 465}, from=${cfg.smtpFrom ?? cfg.smtpUser})`,
+  );
   return transporter;
 }
 
@@ -59,7 +67,14 @@ export async function sendLoginCodeEmail(email: string, code: string, ttlSec: nu
     });
     return true;
   } catch (e) {
-    logger.warn(`SMTP send failed for ${email}: ${String(e instanceof Error ? e.message : e)}`);
+    const err = e instanceof Error ? e : undefined;
+    const respCode =
+      typeof (e as { responseCode?: number })?.responseCode === 'number'
+        ? ` response=${(e as { responseCode?: number }).responseCode}`
+        : '';
+    logger.warn(
+      `SMTP send failed for ${email}: ${err?.message ?? String(e)}${respCode}`,
+    );
     return false;
   }
 }

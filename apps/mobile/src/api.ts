@@ -48,6 +48,9 @@ export function absoluteUrl(path: string | null | undefined): string | null {
   return `${getApiBaseUrl()}${path}`;
 }
 
+/** مهلت پیش‌فرض هر درخواست — سرور free-tier رندر در اولین درخواست سرد ~۴۰ث می‌برد */
+const REQUEST_TIMEOUT_MS = 45_000;
+
 async function request<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -55,11 +58,28 @@ async function request<T>(path: string, init?: RequestInit & { token?: string })
   };
   if (init?.token) headers.Authorization = `Bearer ${init.token}`;
 
+  // بدون این مهلت، اگر سرور پاسخ ندهد fetch تا ابد معلق می‌ماند و اپ برای همیشه می‌چرخد
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+
   let res: Response;
   try {
-    res = await fetch(`${getApiBaseUrl()}/api/v1${path}`, { ...init, headers });
+    res = await fetch(`${getApiBaseUrl()}/api/v1${path}`, {
+      ...init,
+      headers,
+      signal: abort.signal,
+    });
   } catch {
-    throw new ApiError(0, 'NETWORK', 'سرور در دسترس نیست. اتصال اینترنت و آدرس API را بررسی کنید.');
+    if (abort.signal.aborted) {
+      throw new ApiError(0, 'TIMEOUT', 'پاسخی از سرور نرسید؛ چند لحظه بعد دوباره تلاش کنید.');
+    }
+    throw new ApiError(
+      0,
+      'NETWORK',
+      'سرور در دسترس نیست. اتصال اینترنت و آدرس API را بررسی کنید.',
+    );
+  } finally {
+    clearTimeout(timer);
   }
 
   if (res.status === 204) return undefined as T;
