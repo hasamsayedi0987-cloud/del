@@ -312,6 +312,8 @@ export default function App() {
     const onIncoming = (p: {
       call: { id: string; conversationId: string; kind: 'audio' | 'video' };
       caller: { id: string; displayName: string | null; phone: string };
+      group?: boolean;
+      title?: string | null;
     }) => {
       if (callStateRef.current) return; // مشغول — سرور هم جلوی تماس دوم را می‌گیرد
       setCallState({
@@ -319,7 +321,11 @@ export default function App() {
         callId: p.call.id,
         conversationId: p.call.conversationId,
         kind: p.call.kind,
-        peerName: p.caller.displayName ?? p.caller.phone ?? 'ناشناس',
+        group: p.group === true,
+        peerName:
+          p.group === true
+            ? p.title ?? 'تماس گروهی'
+            : p.caller.displayName ?? p.caller.phone ?? 'ناشناس',
       });
     };
 
@@ -332,12 +338,12 @@ export default function App() {
       const cur = callStateRef.current;
       if (!cur || cur.callId !== p.call.id) return;
       if (cur.phase === 'outgoing') {
-        // ما تماس‌گیرنده‌ایم — با توکن این دستگاه وصل شو
+        // ما تماس‌گیرنده‌ایم — با توکن این دستگاه وصل شو (دو‌نفره و گروهی یکسان)
         setCallState({ ...cur, phase: 'active', url: p.url, token: p.token });
       } else if (cur.phase === 'incoming' && acceptingRef.current !== p.call.id) {
         // در دستگاه دیگری پاسخ داده شد — بستن
         closeCall();
-        Alert.alert('تماس', 'تماس در دستگاه دیگری پاسخ داده شد.');
+        Alert.alert('تماس', cur.group ? 'تماس در دستگاه دیگری پاسخ داده شد — از گفتگو می‌توانید بپیوندید.' : 'تماس در دستگاه دیگری پاسخ داده شد.');
       }
       // phase==='incoming' با acceptingRef همین دستگاه → پاسخ REST خودش متصل می‌کند
     };
@@ -383,6 +389,7 @@ export default function App() {
           callId: call.id,
           conversationId: call.conversationId,
           kind,
+          group: conversation.type === 'group',
           peerName,
         });
       } catch (e) {
@@ -424,8 +431,39 @@ export default function App() {
     const cur = callStateRef.current;
     if (!cur || !accessToken) return;
     setCallState(null);
-    await api.endCall(accessToken, cur.callId).catch(() => undefined);
+    // گروهی: ترک تماس (بقیه می‌مانند)؛ دو‌نفره: پایان برای هر دو طرف
+    await (cur.group
+      ? api.leaveCall(accessToken, cur.callId)
+      : api.endCall(accessToken, cur.callId)
+    ).catch(() => undefined);
   }, [accessToken]);
+
+  /** پیوستن به تماس گروهی فعال از نوار «پیوستن» در صفحهٔ گفتگو */
+  const joinCall = useCallback(
+    async (info: { callId: string; conversationId: string; kind: 'audio' | 'video'; title?: string | null }) => {
+      if (!accessToken || callStateRef.current) return;
+      const conv = convCacheRef.current.get(info.conversationId);
+      const title =
+        info.title ??
+        (conv?.type === 'group' ? conv.title ?? 'تماس گروهی' : 'تماس گروهی');
+      try {
+        const joined = await api.joinCall(accessToken, info.callId);
+        setCallState({
+          phase: 'active',
+          callId: info.callId,
+          conversationId: info.conversationId,
+          kind: joined.call.kind ?? info.kind,
+          group: true,
+          peerName: title,
+          url: joined.url,
+          token: joined.token,
+        });
+      } catch (e) {
+        Alert.alert('تماس', faCallError(e));
+      }
+    },
+    [accessToken],
+  );
 
 
   const styles = useStyles(theme);
@@ -468,6 +506,7 @@ export default function App() {
           conversation={route.conversation}
           onBack={() => setRoute({ name: 'chats' })}
           onRequestCall={startCall}
+          onJoinCall={joinCall}
         />
       )}
       {route.name === 'name' && accessToken && (

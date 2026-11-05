@@ -429,6 +429,14 @@ export const api = {
   acceptCall: (token: string, callId: string) =>
     request<CallJoinInfo>(`/calls/${callId}/accept`, { method: 'POST', token }),
 
+  /** پیوستن به تماس گروهی فعال */
+  joinCall: (token: string, callId: string) =>
+    request<CallJoinInfo>(`/calls/${callId}/join`, { method: 'POST', token }),
+
+  /** ترک تماس گروهی (اگر آخرین عضو باشید تماس برای همه تمام می‌شود) */
+  leaveCall: (token: string, callId: string) =>
+    request<{ ended: boolean }>(`/calls/${callId}/leave`, { method: 'POST', token }),
+
   rejectCall: (token: string, callId: string) =>
     request<void>(`/calls/${callId}/reject`, { method: 'POST', token }),
 

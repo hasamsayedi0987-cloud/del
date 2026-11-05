@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -33,12 +34,13 @@ export function Screen({ children }: { children: React.ReactNode }) {
 }
 
 export function Logo({ size = 96 }: { size?: number }) {
-  const theme = useTheme();
-  const styles = makeStyles(theme);
+  // لوگوی رسمی دل (حباب گفتگو + گوشی) — asset شفاف
   return (
-    <View style={[styles.logo, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.logoText, { fontSize: size * 0.42 }]}>دل</Text>
-    </View>
+    <Image
+      source={require('../assets/logo.png')}
+      style={{ width: size, height: size }}
+      resizeMode="contain"
+    />
   );
 }
 

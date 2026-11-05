@@ -18,11 +18,25 @@ export class CallsController {
     return this.calls.start(req.user.sub, dto);
   }
 
-  /** پذیرش تماس — توکن LiveKit هر دو طرف صادر می‌شود */
+  /** پذیرش تماس — دو‌نفره: گیرنده؛ گروهی: هر عضو (اولین پاسخ تماس را فعال می‌کند) */
   @Post(':id/accept')
   @HttpCode(200)
   accept(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.calls.accept(req.user.sub, id);
+  }
+
+  /** پیوستن به تماس گروهی فعال — همان پذیرش برای گروه */
+  @Post(':id/join')
+  @HttpCode(200)
+  join(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.calls.join(req.user.sub, id);
+  }
+
+  /** ترک تماس گروهی — اگر آخرین عضو باشید تماس برای همه تمام می‌شود */
+  @Post(':id/leave')
+  @HttpCode(200)
+  leave(@Req() req: AuthedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.calls.leave(req.user.sub, id);
   }
 
   /** رد تماس ورودی */

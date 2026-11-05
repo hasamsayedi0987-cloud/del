@@ -280,6 +280,10 @@ export interface CallDto {
 export interface WsCallIncoming {
   call: CallDto;
   caller: { id: string; displayName: string | null; phone: string };
+  /** تماس گروهی است؟ (کلاینت: زنگ گروهی + ردِ تک‌دستگاه‌محور) */
+  group?: boolean;
+  /** عنوان گروه برای نمایش روی زنگ */
+  title?: string | null;
 }
 
 /** تماس پاسخ داده شد — هر طرف توکن LiveKit خودش را می‌گیرد */

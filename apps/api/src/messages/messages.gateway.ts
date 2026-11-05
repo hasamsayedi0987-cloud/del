@@ -61,6 +61,27 @@ export class MessagesGateway
   @WebSocketServer()
   server!: Server;
 
+  /**
+   * مقیاس‌پذیری افقی (پیش‌نیاز میلیون‌ها اتصال): با REDIS_URL اداپتر Redis فعال می‌شود تا
+   * رویدادها/اتاق‌ها بین همهٔ نمونه‌های API منتشر شوند — بدون آن، هر نمونه فقط
+   * socketهای خودش را می‌بیند. لازمهٔ پشت Load Balancer: sticky sessions (cookie یا ip_hash).
+   */
+  async afterInit(server: Server): Promise<void> {
+    const redisUrl = process.env.REDIS_URL?.trim();
+    if (!redisUrl) return;
+    try {
+      const { createAdapter } = await import('@socket.io/redis-adapter');
+      const { createClient } = await import('redis');
+      const pub = createClient({ url: redisUrl });
+      const sub = pub.duplicate();
+      await Promise.all([pub.connect(), sub.connect()]);
+      server.adapter(createAdapter(pub, sub));
+      this.logger.log('socket.io Redis adapter ON — چند‌نمونه‌ای آماده است');
+    } catch (e) {
+      this.logger.warn(`Redis adapter failed (${String(e)}) — single-instance mode`);
+    }
+  }
+
   constructor(
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
@@ -386,9 +407,9 @@ export class MessagesGateway
     this.events.on('media.ready', this.onMediaReady);
 
     // ————— گام ۶: تماس‌ها — signaling روی اتاق شخصی (همه دستگاه‌های طرفین) —————
-    // زنگ خوردن — فقط گیرنده می‌شنود
+    // زنگ خوردن — فقط گیرنده می‌شنود (گروهی: هر عضو مستقل)
     this.onCallIncoming = (p: WsCallIncoming & { notifyUserId: string }) => {
-      const payload: WsCallIncoming = { call: p.call, caller: p.caller };
+      const payload: WsCallIncoming = { call: p.call, caller: p.caller, group: p.group, title: p.title };
       this.server?.to(userRoom(p.notifyUserId)).emit('call.incoming', payload);
     };
     this.events.on('call.incoming', this.onCallIncoming);

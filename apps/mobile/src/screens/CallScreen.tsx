@@ -11,15 +11,17 @@ export interface CallState {
   conversationId: string;
   kind: CallKind;
   peerName: string;
+  /** تماس گروهی — نمایش چند شرکت‌کننده + ترک به‌جای پایان */
+  group?: boolean;
   /** پس از پاسخ (caller از WS، callee از پاسخ accept) — کلید اتصال LiveKit */
   url?: string;
   token?: string;
 }
 
 /** پیام وضعیت به فارسی */
-function phaseLabel(phase: CallState['phase'], kind: CallKind): string {
-  if (phase === 'incoming') return `تماس ${kind === 'video' ? 'تصویری' : 'صوتی'} ورودی…`;
-  if (phase === 'outgoing') return 'در حال زنگ زدن…';
+function phaseLabel(phase: CallState['phase'], kind: CallKind, group?: boolean): string {
+  if (phase === 'incoming') return `تماس ${kind === 'video' ? 'تصویری' : 'صوتی'} ${group ? 'گروهی ' : ''}ورودی…`;
+  if (phase === 'outgoing') return group ? 'در حال زنگ زدن به گروه…' : 'در حال زنگ زدن…';
   return 'در حال اتصال…';
 }
 
@@ -46,7 +48,9 @@ export function CallScreen({
   // ————— اتصال LiveKit —————
   const roomRef = useRef<{ disconnect: () => void } | null>(null);
   const [connected, setConnected] = useState(false);
-  const [remoteRef, setRemoteRef] = useState<{ participant: unknown; publication: unknown } | null>(null);
+  /** چند شرکت‌کنندهٔ دور (تماس گروهی): identity → آخرین publication ویدیو (یا null) */
+  const [remotes, setRemotes] = useState<{ identity: string; participant: unknown; publication: unknown }[]>([]);
+  const [othersCount, setOthersCount] = useState(0);
   const [localRef, setLocalRef] = useState<{ participant: unknown; publication: unknown } | null>(null);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -71,20 +75,42 @@ export function CallScreen({
           return;
         }
         roomRef.current = room;
-        room.on('trackSubscribed', (_track: unknown, publication: any, participant: unknown) => {
-          if (publication?.source === 'camera' || publication?.videoTrack) {
-            setRemoteRef({ participant, publication });
-          }
+
+        /** ثبت/به‌روزرسانی یک شرکت‌کنندهٔ دور — تماس گروهی چند identity دارد */
+        const upsertRemote = (participant: any, publication: any | null) => {
+          const identity = String(participant?.identity ?? Math.random());
+          setRemotes((prev) => {
+            const next = prev.filter((r) => r.identity !== identity);
+            const hasVideo = publication && (publication.source === 'camera' || publication.videoTrack);
+            if (hasVideo) next.push({ identity, participant, publication });
+            // اولویت ترتیب: جدیدترها آخر می‌آیند؛ رندر اولین را بزرگ نشان می‌دهد
+            return next;
+          });
+        };
+
+        room.on(
+          'trackSubscribed',
+          (_track: unknown, publication: any, participant: unknown) => {
+            upsertRemote(participant, publication);
+          },
+        );
+        room.on('trackUnsubscribed', (_t: unknown, publication: any, participant: any) => {
+          if (publication?.source === 'camera') upsertRemote(participant, null);
         });
-        room.on('trackUnsubscribed', (_t: unknown, publication: any) => {
-          if (publication?.source === 'camera') setRemoteRef(null);
+        room.on('participantConnected', (participant: unknown) => {
+          setOthersCount((n) => n + 1);
+          const identity = String((participant as { identity?: string })?.identity ?? '');
+          if (identity) upsertRemote(participant, null);
         });
-        room.on('participantDisconnected', () => {
-          // طرف مقابل قطع شد — سرور call.ended می‌فرستد؛ UI زودتر آماده شود
-          setRemoteRef(null);
+        room.on('participantDisconnected', (participant: unknown) => {
+          setOthersCount((n) => Math.max(0, n - 1));
+          const identity = String((participant as { identity?: string })?.identity ?? '');
+          setRemotes((prev) => prev.filter((r) => r.identity !== identity));
         });
         await room.connect(state.url as string, state.token as string);
         if (cancelled) return;
+        const present = Array.from(room.remoteParticipants ?? []) as any[];
+        setOthersCount(present.length);
         setConnected(true);
         if (isVideo) {
           await room.localParticipant.setCameraEnabled(true);
@@ -106,7 +132,8 @@ export function CallScreen({
         /* بی‌اهمیت */
       }
       setConnected(false);
-      setRemoteRef(null);
+      setRemotes([]);
+      setOthersCount(0);
       setLocalRef(null);
       void stopAudioSession();
     };
@@ -143,17 +170,33 @@ export function CallScreen({
     }
   }, [camOn]);
 
-  const showRemoteVideo = isVideo && connected && remoteRef && VideoTrack;
+  const mainRemote = remotes.find((r) => r.publication) ?? remotes[0] ?? null;
+  const otherVideos = remotes.filter((r) => r.publication && r !== mainRemote);
+  const showRemoteVideo = isVideo && connected && mainRemote?.publication && VideoTrack;
   const showLocalVideo = isVideo && connected && localRef && VideoTrack;
+  const groupActive = state.group === true;
+  const statusLine = connectError
+    ? connectError
+    : active
+      ? connected
+        ? groupActive
+          ? isVideo
+            ? `تماس تصویری گروهی · ${othersCount} نفر در اتاق`
+            : `تماس صوتی گروهی · ${othersCount} نفر در اتاق`
+          : isVideo
+            ? 'تماس تصویری برقرار است'
+            : 'تماس برقرار است'
+        : 'در حال اتصال…'
+      : phaseLabel(state.phase, state.kind, groupActive);
 
   return (
     <View style={styles.root}>
-      {/* ویدیوی طرف مقابل — تمام‌صفحه */}
+      {/* ویدیوی اصلی — تمام‌صفحه */}
       {showRemoteVideo ? (
         <VideoTrack
           trackRef={{
-            participant: remoteRef.participant,
-            publication: remoteRef.publication,
+            participant: mainRemote.participant,
+            publication: mainRemote.publication,
             source: 'camera',
           }}
           style={StyleSheet.absoluteFill}
@@ -177,6 +220,25 @@ export function CallScreen({
         </View>
       ) : null}
 
+      {/* نوار ویدیوهای دیگر اعضا — تماس گروهی تصویری */}
+      {isVideo && connected && otherVideos.length ? (
+        <View style={styles.strip}>
+          {otherVideos.slice(0, 6).map((r) => (
+            <View key={r.identity} style={styles.stripItem}>
+              <VideoTrack
+                trackRef={{
+                  participant: r.participant,
+                  publication: r.publication,
+                  source: 'camera',
+                }}
+                style={styles.pipVideo}
+                zOrder={2}
+              />
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {/* لایه اطلاعات — در تماس تصویری جمع‌وجورتر */}
       <View style={[styles.info, isVideo && connected ? styles.infoCompact : null]} pointerEvents="none">
         {!isVideo || !connected ? (
@@ -189,17 +251,7 @@ export function CallScreen({
         <Text style={styles.peerName} numberOfLines={1}>
           {state.peerName || 'ناشناس'}
         </Text>
-        <Text style={styles.statusText}>
-          {connectError
-            ? connectError
-            : active
-              ? connected
-                ? isVideo
-                  ? 'تماس تصویری برقرار است'
-                  : 'تماس برقرار است'
-                : 'در حال اتصال…'
-              : phaseLabel(state.phase, state.kind)}
-        </Text>
+        <Text style={styles.statusText}>{statusLine}</Text>
         {!connected && active && !connectError ? (
           <ActivityIndicator color={theme.accent} style={{ marginTop: 12 }} />
         ) : null}
@@ -300,4 +352,22 @@ const styles = StyleSheet.create({
     zIndex: 5,
   },
   pipVideo: { width: '100%', height: '100%' },
+  /** نوار افقی ویدیوی دیگر اعضای تماس گروهی — پایینِ PIP */
+  strip: {
+    position: 'absolute',
+    top: 232,
+    left: 16,
+    flexDirection: 'row',
+    gap: 8,
+    zIndex: 5,
+  },
+  stripItem: {
+    width: 78,
+    height: 104,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: '#0E2440',
+  },
 });

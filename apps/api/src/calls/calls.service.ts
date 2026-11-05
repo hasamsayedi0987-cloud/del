@@ -62,11 +62,14 @@ function toCallDto(c: CallRow): CallDto {
 }
 
 /**
- * تماس‌های ۱:۱ صوتی/تصویری (گام ۶)
+ * تماس‌های صوتی/تصویری — دو‌نفره و گروهی (تا سقف CALL_GROUP_MAX اعضا)
  * signaling روی WS (call.incoming / call.accepted / call.ended)؛
- * صدا و تصویر مستقیم بین کلاینت‌ها از LiveKit (SFU) می‌گذرد — بایت‌های مدیا از API عبور نمی‌کنند.
+ * صدا و تصویر از LiveKit (SFU) می‌گذرد — بایت‌های مدیا از API عبور نمی‌کنند.
  *
  * چرخه عمر: ringing → active → ended | rejected | cancelled | missed
+ *  • دو‌نفره: مثل قبل — گیرنده یکتا (calleeId)؛ پاسخ/رد/لغو/قطع.
+ *  • گروهی: calleeId = callerId (بدون مهاجرت دیتابیس)؛ هر عضو با accept/join می‌پیوندد،
+ *    با leave فقط خودش بیرون می‌آید؛ پایان کل تماس = خروج آخرین عضو یا end توسط تماس‌گیرنده.
  * زنگ بدون پاسخ پس از CALL_RING_TIMEOUT_SEC خودکار «missed» می‌شود.
  */
 @Injectable()
@@ -75,6 +78,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   private cfg: AppConfig;
   /** تایمرهای زنگ — پس از پاسخ/رد/لغو پاک می‌شوند */
   private readonly ringTimers = new Map<string, NodeJS.Timeout>();
+  /** اعضای حاضر تماس گروهی — fallback در حافظه؛ با REDIS_URL بین نمونه‌ها مشترک می‌شود */
+  private readonly groupMembers = new Map<string, Set<string>>();
+  private redis: import('redis').RedisClientType | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -86,6 +92,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
+    void this.initRedis();
     // بازیابی زنگ‌های ناتمام پس از ری‌استارت سرور — همان قانون timeout اعمال می‌شود
     void this.sweepStaleRinging();
   }
@@ -93,9 +100,73 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy(): void {
     for (const t of this.ringTimers.values()) clearTimeout(t);
     this.ringTimers.clear();
+    void this.redis?.quit().catch(() => undefined);
   }
 
-  /** شروع تماس — فقط مکالمه‌های ۱:۱ (گروه‌ها در گام‌های بعد) */
+  private async initRedis(): Promise<void> {
+    if (!this.cfg.redisUrl) return;
+    try {
+      const { createClient } = await import('redis');
+      this.redis = createClient({ url: this.cfg.redisUrl });
+      this.redis.on('error', () => undefined); // قطعی شبکه نباید اپ را بیندازد
+      await this.redis.connect();
+      this.logger.log('CallsService: Redis shared group-call state ready');
+    } catch (e) {
+      this.logger.warn(`Redis unavailable for call state (${String(e)}) — in-memory only`);
+      this.redis = null;
+    }
+  }
+
+  // ————— اعضای تماس گروهی (Redis یا حافظه) —————
+
+  private async membersAdd(callId: string, userId: string): Promise<number> {
+    if (this.redis) {
+      try {
+        await this.redis.sAdd(`del:call:members:${callId}`, userId);
+        await this.redis.expire(`del:call:members:${callId}`, 6 * 3600);
+        return await this.redis.sCard(`del:call:members:${callId}`);
+      } catch {
+        /* زیر — حافظه */
+      }
+    }
+    const set = this.groupMembers.get(callId) ?? new Set<string>();
+    set.add(userId);
+    this.groupMembers.set(callId, set);
+    return set.size;
+  }
+
+  private async membersRemove(callId: string, userId: string): Promise<number> {
+    if (this.redis) {
+      try {
+        await this.redis.sRem(`del:call:members:${callId}`, userId);
+        const n = await this.redis.sCard(`del:call:members:${callId}`);
+        if (n === 0) await this.redis.del(`del:call:members:${callId}`);
+        return n;
+      } catch {
+        /* زیر — حافظه */
+      }
+    }
+    const set = this.groupMembers.get(callId);
+    if (!set) return 0;
+    set.delete(userId);
+    const n = set.size;
+    if (!n) this.groupMembers.delete(callId);
+    return n;
+  }
+
+  private async membersClear(callId: string): Promise<void> {
+    if (this.redis) {
+      try {
+        await this.redis.del(`del:call:members:${callId}`);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.groupMembers.delete(callId);
+  }
+
+  // ————— ۱) شروع تماس —————
+
   async start(userId: string, input: { conversationId: string; kind: CallKind }): Promise<CallDto> {
     this.requireConfigured();
 
@@ -104,15 +175,24 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       include: { participants: { select: { userId: true } } },
     });
     if (!conv) throw httpError(404, 'CONVERSATION_NOT_FOUND', 'گفتگو یافت نشد');
-    if (conv.type !== 'direct') {
-      throw httpError(409, 'NOT_DIRECT', 'فعلاً فقط تماس در گفتگوهای ۱:۱ ممکن است — تماس گروهی در گام‌های بعد');
-    }
     const mine = conv.participants.find((p) => p.userId === userId);
     if (!mine) throw httpError(403, 'NOT_A_PARTICIPANT', 'شما عضو این گفتگو نیستید');
+
+    if (conv.type === 'direct') {
+      return this.startDirect(userId, conv, input.kind);
+    }
+    return this.startGroup(userId, conv as typeof conv & { type: 'group' }, input.kind);
+  }
+
+  private async startDirect(
+    userId: string,
+    conv: { id: string; participants: { userId: string }[] },
+    kind: CallKind,
+  ): Promise<CallDto> {
     const peer = conv.participants.find((p) => p.userId !== userId);
     if (!peer) throw httpError(409, 'CONVERSATION_EMPTY', 'طرف مقابل در این گفتگو نیست');
 
-    // مسدودسازی (گام ۱۰) — تماس بین زوج مسدود بسته است
+    // مسدودسازی — تماس بین زوج مسدود بسته است
     await this.blocks.assertNotBlocked(userId, peer.userId);
 
     // قانون مشغولی — هر طرف در تماس باز (ringing/active) باشد تماس تازه رد می‌شود
@@ -124,7 +204,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         conversationId: conv.id,
         callerId: userId,
         calleeId: peer.userId,
-        kind: input.kind,
+        kind,
         status: 'ringing',
       },
       select: CALL_SELECT,
@@ -138,61 +218,166 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     // زنگ به اتاق شخصی گیرنده — همه دستگاه‌های او می‌شنوند
     this.events.emit('call.incoming', {
       call: toCallDto(call),
-      caller: caller ?? { id: userId, displayName: null, phone: null },
+      caller: caller ?? { id: userId, displayName: null, phone: '' },
       notifyUserId: peer.userId,
     });
     this.armRingTimer(call.id);
     return toCallDto(call);
   }
 
-  /** پذیرش تماس — فقط گیرنده و فقط در وضعیت ringing؛ توکن LiveKit هر دو طرف صادر می‌شود */
-  async accept(userId: string, callId: string): Promise<{
-    call: CallDto;
-    url: string;
-    token: string;
-    room: string;
-  }> {
+  private async startGroup(
+    userId: string,
+    conv: { id: string; participants: { userId: string }[] },
+    kind: CallKind,
+  ): Promise<CallDto> {
+    const others = conv.participants.filter((p) => p.userId !== userId);
+    if (!others.length) throw httpError(409, 'CONVERSATION_EMPTY', 'گروه خالی است');
+
+    // مشغولی فقط برای تماس‌گیرنده — عضو گروه در تماس دیگر نباید مانع تماس گروهی شود
+    const busy = await this.hasOpenCall([userId]);
+    if (busy) throw httpError(409, 'CALL_BUSY', 'شما در حال حاضر در تماس دیگری هستید');
+
+    const call = await this.prisma.call.create({
+      data: {
+        conversationId: conv.id,
+        callerId: userId,
+        calleeId: userId, // گروه: callee یکتا ندارد — خود تماس‌گیرنده ثبت می‌شود
+        kind,
+        status: 'ringing',
+      },
+      select: CALL_SELECT,
+    });
+    await this.membersAdd(call.id, userId);
+
+    const caller = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, displayName: true, phone: true },
+    });
+    const title = await this.prisma.conversation
+      .findUnique({ where: { id: conv.id }, select: { title: true } })
+      .then((c) => c?.title ?? null);
+
+    // زنگ به اتاق شخصی همهٔ اعضا — هر دستگاه مستقل پاسخ می‌دهد
+    for (const p of others) {
+      this.events.emit('call.incoming', {
+        call: toCallDto(call),
+        caller: caller ?? { id: userId, displayName: null, phone: '' },
+        notifyUserId: p.userId,
+        group: true,
+        title,
+      });
+    }
+    this.armRingTimer(call.id);
+    return toCallDto(call);
+  }
+
+  // ————— ۲) پذیرش / پیوستن —————
+
+  /**
+   * پذیرش تماس: دو‌نفره → فقط گیرنده در وضعیت ringing.
+   * گروهی → هر عضو گفتگو؛ اولین پاسخ ringing→active، بقیه «پیوستن» (حتی وقتی active است).
+   */
+  async accept(userId: string, callId: string): Promise<{ call: CallDto; url: string; token: string; room: string }> {
     this.requireConfigured();
 
     const call = await this.prisma.call.findUnique({ where: { id: callId }, select: CALL_SELECT });
     if (!call) throw httpError(404, 'CALL_NOT_FOUND', 'تماس یافت نشد');
-    if (call.calleeId !== userId) {
-      throw httpError(403, 'NOT_CALLEE', 'فقط گیرنده تماس می‌تواند پاسخ دهد');
-    }
-    if (call.status !== 'ringing') {
-      throw httpError(409, 'INVALID_STATE', `تماس در وضعیت «${call.status}» است — قابل پاسخ نیست`);
-    }
 
-    const connectedAt = new Date();
-    const updated = await this.prisma.call.update({
-      where: { id: call.id },
-      data: { status: 'active', connectedAt },
-      select: CALL_SELECT,
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: call.conversationId },
+      select: { type: true, participants: { select: { userId: true } } },
     });
-    this.clearRingTimer(call.id);
+    if (!conv) throw httpError(404, 'CONVERSATION_NOT_FOUND', 'گفتگوی تماس یافت نشد');
+    const participant = conv.participants.find((p) => p.userId === userId);
+    if (!participant) throw httpError(403, 'NOT_A_PARTICIPANT', 'شما عضو این گفتگو نیستید');
 
-    const url = this.cfg.livekitUrl as string;
+    if (conv.type === 'direct') {
+      if (call.calleeId !== userId) {
+        throw httpError(403, 'NOT_CALLEE', 'فقط گیرنده تماس می‌تواند پاسخ دهد');
+      }
+      if (call.status !== 'ringing') {
+        throw httpError(409, 'INVALID_STATE', `تماس در وضعیت «${call.status}» است — قابل پاسخ نیست`);
+      }
+      const connectedAt = new Date();
+      const updated = await this.prisma.call.update({
+        where: { id: call.id },
+        data: { status: 'active', connectedAt },
+        select: CALL_SELECT,
+      });
+      this.clearRingTimer(call.id);
+
+      const url = this.cfg.livekitUrl as string;
+      const room = `call:${call.id}`;
+      const tokens: Record<string, string> = {
+        [call.callerId]: await this.livekitToken(call.callerId, room),
+        [call.calleeId]: await this.livekitToken(call.calleeId, room),
+      };
+
+      this.events.emit('call.accepted', {
+        call: toCallDto(updated),
+        url,
+        room,
+        tokens,
+        notifyUserIds: [call.callerId, call.calleeId],
+      });
+      return { call: toCallDto(updated), url, token: tokens[call.calleeId]!, room };
+    }
+
+    // ————— گروهی —————
+    if (call.status !== 'ringing' && call.status !== 'active') {
+      throw httpError(409, 'INVALID_STATE', `تماس در وضعیت «${call.status}» است — پیوستن ممکن نیست`);
+    }
     const room = `call:${call.id}`;
-    const tokens: Record<string, string> = {
-      [call.callerId]: await this.livekitToken(call.callerId, room),
-      [call.calleeId]: await this.livekitToken(call.calleeId, room),
-    };
+    const url = this.cfg.livekitUrl as string;
+    const token = await this.livekitToken(userId, room);
 
-    // هر طرف توکن خودش را می‌گیرد — به اتاق شخصی (همه دستگاه‌ها)
+    const first = call.status === 'ringing';
+    const updated = first
+      ? await this.prisma.call.update({
+          where: { id: call.id },
+          data: { status: 'active', connectedAt: new Date() },
+          select: CALL_SELECT,
+        })
+      : call;
+    if (first) this.clearRingTimer(call.id);
+    await this.membersAdd(call.id, userId);
+
+    const tokens: Record<string, string> = { [userId]: token };
+    if (first) {
+      // تماس‌گیرنده هنوز در حال زنگ است — باید توکن بگیرد تا وصل شود
+      tokens[call.callerId] = await this.livekitToken(call.callerId, room);
+    }
+
+    // همهٔ اعضا می‌فهمند تماس فعال شد/عضو تازه پیوست — بدون تماسِ باز UI نوار «پیوستن» می‌سازد
     this.events.emit('call.accepted', {
       call: toCallDto(updated),
       url,
       room,
       tokens,
-      notifyUserIds: [call.callerId, call.calleeId],
+      notifyUserIds: conv.participants.map((p) => p.userId),
     });
-    return { call: toCallDto(updated), url, token: tokens[call.calleeId]!, room };
+    return { call: toCallDto(updated), url, token, room };
   }
 
-  /** رد تماس — فقط گیرنده */
+  /** پیوستن به تماس گروهی فعال — میان‌بر معنایی همان accept برای گروه */
+  async join(userId: string, callId: string): Promise<{ call: CallDto; url: string; token: string; room: string }> {
+    return this.accept(userId, callId);
+  }
+
+  // ————— ۳) رد / لغو —————
+
   async reject(userId: string, callId: string): Promise<void> {
     const call = await this.prisma.call.findUnique({ where: { id: callId }, select: CALL_SELECT });
     if (!call) throw httpError(404, 'CALL_NOT_FOUND', 'تماس یافت نشد');
+
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: call.conversationId },
+      select: { type: true },
+    });
+    if (conv?.type === 'group') {
+      // در گروه، ردِ یک عضو تماس را برای بقیه نمی‌بندد — فقط زنگ این دستگاه خاموش می‌شود (سمت کلاینت)
+      return;
+    }
     if (call.calleeId !== userId) throw httpError(403, 'NOT_CALLEE', 'فقط گیرنده تماس می‌تواند رد کند');
     if (call.status !== 'ringing') {
       throw httpError(409, 'INVALID_STATE', `تماس در وضعیت «${call.status}» است`);
@@ -212,7 +397,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** لغو تماس پیش از پاسخ — فقط تماس‌گیرنده */
   async cancel(userId: string, callId: string): Promise<void> {
     const call = await this.prisma.call.findUnique({ where: { id: callId }, select: CALL_SELECT });
     if (!call) throw httpError(404, 'CALL_NOT_FOUND', 'تماس یافت نشد');
@@ -225,22 +409,72 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       data: { status: 'cancelled', endReason: 'cancel', endedAt: new Date() },
     });
     this.clearRingTimer(call.id);
+    await this.membersClear(call.id);
     this.events.emit('call.ended', {
       callId: call.id,
       conversationId: call.conversationId,
       reason: 'cancel',
       by: userId,
       durationS: null,
-      notifyUserIds: [call.callerId, call.calleeId],
+      notifyUserIds: await this.participantIds(call.conversationId),
     });
   }
 
-  /** پایان تماس فعال — هر طرف می‌تواند قطع کند */
+  // ————— ۴) ترک تماس / پایان —————
+
+  /** ترک تماس گروهی — اگر آخرین عضو باشد تماس برای همه تمام می‌شود */
+  async leave(userId: string, callId: string): Promise<{ ended: boolean }> {
+    const call = await this.prisma.call.findUnique({ where: { id: callId }, select: CALL_SELECT });
+    if (!call) throw httpError(404, 'CALL_NOT_FOUND', 'تماس یافت نشد');
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: call.conversationId },
+      select: { type: true },
+    });
+    if (conv?.type !== 'group') {
+      // دو‌نفره: ترک همان پایان تماس است
+      await this.end(userId, callId);
+      return { ended: true };
+    }
+    if (call.status !== 'active') return { ended: false };
+    const remaining = await this.membersRemove(callId, userId);
+    if (remaining <= 0) {
+      const endedAt = new Date();
+      const durationS = call.connectedAt
+        ? Math.max(0, Math.round((endedAt.getTime() - call.connectedAt.getTime()) / 1000))
+        : 0;
+      await this.prisma.call.update({
+        where: { id: call.id },
+        data: { status: 'ended', endReason: 'hangup', endedAt, durationS },
+      });
+      this.clearRingTimer(call.id);
+      this.events.emit('call.ended', {
+        callId: call.id,
+        conversationId: call.conversationId,
+        reason: 'hangup',
+        by: userId,
+        durationS,
+        notifyUserIds: await this.participantIds(call.conversationId),
+      });
+      return { ended: true };
+    }
+    // عضو رفت — بقیه از طریق participantDisconnected در LiveKit می‌فهمند؛ رویداد جدا لازم نیست
+    return { ended: false };
+  }
+
+  /** پایان تماس — دو‌نفره: هر طرف؛ گروهی: تماس‌گیرنده برای همه */
   async end(userId: string, callId: string): Promise<CallDto> {
     const call = await this.prisma.call.findUnique({ where: { id: callId }, select: CALL_SELECT });
     if (!call) throw httpError(404, 'CALL_NOT_FOUND', 'تماس یافت نشد');
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: call.conversationId },
+      select: { type: true },
+    });
+    const isGroup = conv?.type === 'group';
     if (call.callerId !== userId && call.calleeId !== userId) {
       throw httpError(403, 'NOT_CALL_PARTICIPANT', 'شما در این تماس نیستید');
+    }
+    if (isGroup && call.callerId !== userId) {
+      throw httpError(403, 'ONLY_CALLER_ENDS_GROUP', 'فقط تماس‌گیرنده می‌تواند تماس گروهی را برای همه تمام کند — از «ترک تماس» استفاده کنید');
     }
     if (call.status !== 'active') {
       throw httpError(409, 'INVALID_STATE', `تماس در وضعیت «${call.status}» است — پایان دادن ممکن نیست`);
@@ -254,26 +488,39 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       data: { status: 'ended', endReason: 'hangup', endedAt, durationS },
       select: CALL_SELECT,
     });
+    await this.membersClear(call.id);
     this.events.emit('call.ended', {
       callId: call.id,
       conversationId: call.conversationId,
       reason: 'hangup',
       by: userId,
       durationS,
-      notifyUserIds: [call.callerId, call.calleeId],
+      notifyUserIds: await this.participantIds(call.conversationId),
     });
     return toCallDto(updated);
   }
 
-  /** تاریخچه تماس‌های کاربر (یا یک گفتگو) — صفحه‌بندی با cursor تاریخ */
+  /** تاریخچه تماس‌های کاربر (یا یک گفتگو) — گروهی هم برای همهٔ اعضا دیده می‌شود */
   async history(
     userId: string,
     query: { conversationId?: string; before?: string; limit?: number },
   ): Promise<CallPage> {
     const limit = Math.min(Math.max(query.limit ?? 30, 1), 100);
+    const myConvIds = query.conversationId
+      ? []
+      : (
+          await this.prisma.participant.findMany({
+            where: { userId },
+            select: { conversationId: true },
+          })
+        ).map((p) => p.conversationId);
     const where = {
       conversationId: query.conversationId,
-      OR: [{ callerId: userId }, { calleeId: userId }],
+      OR: [
+        { callerId: userId },
+        { calleeId: userId },
+        ...(myConvIds.length ? [{ conversationId: { in: myConvIds } }] : []),
+      ],
       ...(query.before ? { startedAt: { lt: new Date(query.before) } } : {}),
     };
     const rows = await this.prisma.call.findMany({
@@ -301,6 +548,14 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         'سرور LiveKit پیکربندی نشده — متغیرهای LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET لازم است',
       );
     }
+  }
+
+  private async participantIds(conversationId: string): Promise<string[]> {
+    const rows = await this.prisma.participant.findMany({
+      where: { conversationId },
+      select: { userId: true },
+    });
+    return rows.map((r) => r.userId);
   }
 
   /** آیا هر یک از این کاربران تماس باز (ringing/active) دارد؟ */
@@ -342,13 +597,14 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         where: { id: call.id },
         data: { status: 'missed', endReason: 'timeout', endedAt: new Date() },
       });
+      await this.membersClear(callId);
       this.events.emit('call.ended', {
         callId: call.id,
         conversationId: call.conversationId,
         reason: 'timeout',
         by: call.callerId,
         durationS: null,
-        notifyUserIds: [call.callerId, call.calleeId],
+        notifyUserIds: await this.participantIds(call.conversationId),
       });
     } catch (e) {
       this.logger.warn(`expireRinging failed for ${callId}: ${String(e)}`);
@@ -396,7 +652,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         algorithm: 'HS256',
         issuer: this.cfg.livekitApiKey as string,
         subject: userId,
-        jwtid: `${room}:${userId}`,
+        jwtid: `${room}:${userId}:${Date.now()}`,
         notBefore: '-10s',
         expiresIn: ttl,
       },

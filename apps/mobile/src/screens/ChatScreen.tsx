@@ -74,13 +74,21 @@ export function ChatScreen({
   conversation,
   onBack,
   onRequestCall,
+  onJoinCall,
 }: {
   accessToken: string;
   myUserId: string;
   conversation: ConversationDto;
   onBack: () => void;
-  /** گام ۶: درخواست تماس صوتی/تصویری — فقط گفتگوهای ۱:۱ */
+  /** درخواست تماس صوتی/تصویری — دو‌نفره و گروهی */
   onRequestCall?: (conversation: ConversationDto, kind: 'audio' | 'video') => void;
+  /** پیوستن به تماس گروهی در جریان (نوار بالای صفحه) */
+  onJoinCall?: (info: {
+    callId: string;
+    conversationId: string;
+    kind: 'audio' | 'video';
+    title?: string | null;
+  }) => void;
 }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
@@ -191,17 +199,20 @@ export function ChatScreen({
     );
   }, [blockedPeer, conversation.peer, toggleBlockPeer]);
 
-  /** دکمه‌های تماس در همهٔ چت‌ها — گروه فعلاً پشتیبانی نمی‌شود و پیام شفاف می‌دهد */
+  /** دکمه‌های تماس در همهٔ چت‌ها — دو‌نفره و گروهی (سرور سقف و مشغولی را کنترل می‌کند) */
   const requestCall = useCallback(
     (kind: 'audio' | 'video') => {
-      if (isGroup) {
-        Alert.alert('تماس', 'فعلاً تماس صوتی/تصویری فقط در گفتگوهای دو\u200cنفره ممکن است.');
-        return;
-      }
       onRequestCall?.(conversation, kind);
     },
-    [isGroup, onRequestCall, conversation],
+    [onRequestCall, conversation],
   );
+
+  // ————— تماس گروهی در جریان — نوار «پیوستن» (state؛ افکت بعد از convId) —————
+  const [liveGroupCall, setLiveGroupCall] = useState<{
+    callId: string;
+    kind: 'audio' | 'video';
+    title?: string | null;
+  } | null>(null);
 
   // ————— گام ۹: هوش مصنوعی (ترجمه/پیشنهاد/خلاصه با رضایت opt-in) —————
   const [aiBusy, setAiBusy] = useState(false);
@@ -253,6 +264,30 @@ export function ChatScreen({
     }, 800);
     return () => clearTimeout(t);
   }, [messages, convId]);
+
+  // ————— تماس گروهی در جریان — رویدادهای WS این گفتگو → نوار «پیوستن» —————
+  useEffect(() => {
+    if (!isGroup) {
+      setLiveGroupCall(null);
+      return;
+    }
+    const s = getSocket();
+    if (!s) return;
+    const onAccepted = (p: { call: { id: string; conversationId: string; kind: 'audio' | 'video' } }) => {
+      if (p.call.conversationId !== convId) return;
+      setLiveGroupCall({ callId: p.call.id, kind: p.call.kind, title: conversation.title ?? null });
+    };
+    const onEnded = (p: { callId: string; conversationId: string }) => {
+      if (p.conversationId !== convId) return;
+      setLiveGroupCall((cur) => (cur?.callId === p.callId ? null : cur));
+    };
+    s.on('call.accepted', onAccepted);
+    s.on('call.ended', onEnded);
+    return () => {
+      s.off('call.accepted', onAccepted);
+      s.off('call.ended', onEnded);
+    };
+  }, [isGroup, convId, conversation.title]);
 
   /** افزودن/به‌روزرسانی پیام با dedupe روی clientMsgId */
   const upsert = useCallback((msg: LocalMsg) => {
@@ -765,6 +800,25 @@ export function ChatScreen({
         </View>
       </View>
 
+      {liveGroupCall ? (
+        <TouchableOpacity
+          style={styles.joinCallBar}
+          onPress={() =>
+            onJoinCall?.({
+              callId: liveGroupCall.callId,
+              conversationId: convId,
+              kind: liveGroupCall.kind,
+              title: liveGroupCall.title,
+            })
+          }
+          accessibilityLabel="پیوستن به تماس گروهی"
+        >
+          <Text style={styles.joinCallText}>
+            {liveGroupCall.kind === 'video' ? '🎥' : '📞'} تماس {liveGroupCall.kind === 'video' ? 'تصویری' : 'صوتی'} گروهی در جریان است — ضربه بزنید تا بپیوندید
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       {hasMore ? (
         <TouchableOpacity onPress={loadOlder}>
           <Text style={styles.loadOlder}>بارگذاری پیام‌های قدیمی‌تر…</Text>
@@ -1052,6 +1106,14 @@ const makeStyles = (theme: DelTheme) =>
   headerStatus: { color: theme.textDim, fontSize: 12, marginTop: 2 },
   headerTyping: { color: theme.accent },
   loadOlder: { color: theme.accent, textAlign: 'center', paddingVertical: 10, fontSize: 13 },
+  joinCallBar: {
+    backgroundColor: theme.accentSoft,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    paddingVertical: 12,
+    paddingHorizontal: theme.space,
+  },
+  joinCallText: { color: theme.accent, fontWeight: '700', fontSize: 14, textAlign: 'center' },
   list: { padding: 12, flexGrow: 1, justifyContent: 'flex-end' },
   bubbleRow: { flexDirection: 'row', marginTop: 6 },
   bubble: {
