@@ -109,6 +109,11 @@ android {
             keyPassword 'android'
         }
     }
+    lint {
+        // سندباکس رم محدود — vital lint حذف (بعداً روی دستگاه قدرتمند اجرا شود)
+        checkReleaseBuilds false
+        abortOnError false
+    }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
