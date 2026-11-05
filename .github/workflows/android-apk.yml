@@ -17,9 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # نسخهٔ pnpm از packageManager در package.json خوانده می‌شود — پینِ جداگانه خطای تعارض می‌دهد
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
