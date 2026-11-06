@@ -12,18 +12,23 @@ import {
 } from 'class-validator';
 
 export class PresignDto {
-  @ApiProperty({ description: 'مکالمه مقصد — فقط اعضا می‌توانند رسانه آپلود کنند' })
+  /** گفتگوی مقصد — فقط اعضا می‌توانند رسانهٔ گفتگو آپلود کنند.
+   *  خالی = رسانهٔ شخصی فرستنده (استوری) — دسترسی با مالکیت و URL امضاشده کنترل می‌شود */
+  @ApiPropertyOptional({ description: 'مکالمه مقصد — خالی برای رسانهٔ استوری' })
+  @IsOptional()
   @IsUUID()
-  conversationId!: string;
+  conversationId?: string;
 
   @ApiProperty({ example: 'image/jpeg' })
   @IsString()
   @Matches(/^[a-z]+\/[a-z0-9.+-]+$/i, { message: 'mime must look like type/subtype' })
   mime!: string;
 
+  /** اندازهٔ اعلامی — ۰ یعنی نامعلوم (اندروید گاهی fileSize نمی‌دهد)؛
+   *  در complete اندازهٔ واقعی جایگزین می‌شود */
   @ApiProperty({ example: 245760 })
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(1024 * 1024 * 1024)
   size!: number;
 

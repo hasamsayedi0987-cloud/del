@@ -200,7 +200,8 @@ export type MediaKind = 'image' | 'video' | 'audio' | 'file';
 export interface MediaAssetDto {
   id: string;
   ownerId: string;
-  conversationId: string;
+  /** null برای رسانهٔ شخصی مالک (استوری) */
+  conversationId: string | null;
   kind: MediaKind;
   mime: string;
   /** اندازه بایت — همان که در presign ادعا شده */
@@ -461,7 +462,7 @@ export interface AiUsageReport {
 
 // ————— استوری‌ها (v1.4) —————
 
-export type StoryKind = 'text' | 'image';
+export type StoryKind = 'text' | 'image' | 'video';
 
 /** کلیدهای پس‌زمینهٔ استوری متنی — در دو اپ موبایل/دسکتاپ همان پالت است */
 export type StoryBgKey = 'aurora' | 'sunset' | 'ocean' | 'forest' | 'night' | 'bloom';
@@ -475,7 +476,8 @@ export interface StoryDto {
   text: string | null;
   bgKey: StoryBgKey | string;
   textColor: string;
-  /** استوری تصویری است؟ بایت تصویر با GET /stories/:id/media گرفته می‌شود */
+  /** استوری رسانه‌دار است؟ تصویر قدیمی با GET /stories/:id/media،
+   *  تصویر/ویدیوی تازه با URL امضاشدهٔ GET /stories/:id/url */
   hasMedia: boolean;
   createdAt: string;
   /** ثانیه تا انقضا */

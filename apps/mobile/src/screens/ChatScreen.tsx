@@ -110,6 +110,98 @@ export function ChatScreen({
   const [groupDetail, setGroupDetail] = useState<ConversationDto | null>(null);
   const members = groupDetail?.participants ?? conversation.participants ?? [];
   const memberCount = groupDetail?.memberCount ?? conversation.memberCount ?? members.length;
+  const myGroupRole = groupDetail?.myRole ?? conversation.myRole ?? null;
+  const canManageGroup = isGroup && myGroupRole === 'admin';
+  // ————— مدیریت گروه (v1.5.4) — افزودن/حذف عضو، تغییر نام، خروج —————
+  const [groupSheet, setGroupSheet] = useState(false);
+  const [addEmail, setAddEmail] = useState('');
+  const [groupEditTitle, setGroupEditTitle] = useState('');
+  const [groupBusy, setGroupBusy] = useState(false);
+
+  const refreshGroupDetail = useCallback(async () => {
+    try {
+      const detail = await api.getConversation(accessToken, conversation.id);
+      setGroupDetail(detail);
+    } catch {
+      // جزئیات قبلی می‌ماند
+    }
+  }, [accessToken, conversation.id]);
+
+  /** افزودن عضو با ایمیل — مثل شروع گفتگوی مستقیم */
+  const addGroupMember = async () => {
+    const email = addEmail.trim().toLowerCase();
+    if (!email) return;
+    setGroupBusy(true);
+    try {
+      const u = await api.findUserByEmail(accessToken, email);
+      await api.addGroupMembers(accessToken, conversation.id, [u.id]);
+      setAddEmail('');
+      await refreshGroupDetail();
+      Alert.alert('عضو اضافه شد ✓', u.displayName ? `${u.displayName} به گروه اضافه شد` : 'عضو جدید اضافه شد');
+    } catch (e) {
+      Alert.alert(
+        'افزودن عضو',
+        e instanceof ApiError
+          ? e.code === 'USER_NOT_FOUND'
+            ? 'کاربری با این ایمیل در دل نیست'
+            : faError(e)
+          : 'افزودن ناموفق بود',
+      );
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
+  const removeMember = async (p: ParticipantDto) => {
+    Alert.alert('حذف عضو', `${p.displayName ?? p.phone ?? 'این کاربر'} از گروه حذف شود؟`, [
+      { text: 'انصراف', style: 'cancel' },
+      {
+        text: 'حذف',
+        style: 'destructive',
+        onPress: () => {
+          void api
+            .removeGroupMember(accessToken, conversation.id, p.userId)
+            .then(() => refreshGroupDetail())
+            .catch(() => Alert.alert('حذف عضو', 'عملیات ناموفق بود'));
+        },
+      },
+    ]);
+  };
+
+  const renameGroupNow = async () => {
+    const title = groupEditTitle.trim();
+    if (!title) return;
+    setGroupBusy(true);
+    try {
+      const updated = await api.renameGroup(accessToken, conversation.id, title);
+      setGroupDetail((cur) => (cur ? { ...cur, title: updated.title } : cur));
+      Alert.alert('ذخیره شد', 'نام گروه به‌روزرسانی شد');
+    } catch {
+      Alert.alert('نام گروه', 'تغییر نام ناموفق بود');
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
+  const leaveGroupNow = () => {
+    Alert.alert('خروج از گروه', 'مطمئنید؟ پیام‌های گروه می‌ماند ولی دیگر عضو نیستید.', [
+      { text: 'انصراف', style: 'cancel' },
+      {
+        text: 'خروج',
+        style: 'destructive',
+        onPress: () => {
+          void api
+            .leaveGroup(accessToken, conversation.id)
+            .then(() => {
+              setGroupSheet(false);
+              onBack();
+            })
+            .catch(() => Alert.alert('خروج از گروه', 'عملیات ناموفق بود'));
+        },
+      },
+    ]);
+  };
+
   const senderName = useCallback(
     (senderId: string): string => {
       if (!isGroup) return '';
@@ -781,7 +873,19 @@ export function ChatScreen({
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.back}>‹ بازگشت</Text>
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
+        <TouchableOpacity
+          style={styles.headerCenter}
+          activeOpacity={0.7}
+          onPress={
+            isGroup
+              ? () => {
+                  setGroupEditTitle(conversation.title ?? groupDetail?.title ?? '');
+                  void refreshGroupDetail();
+                  setGroupSheet(true);
+                }
+              : undefined
+          }
+        >
           <Text style={styles.headerName} numberOfLines={1}>
             {e2eeOn && !isGroup ? '\ud83d\udd12 ' : ''}
             {isGroup
@@ -808,9 +912,22 @@ export function ChatScreen({
                       ? `آخرین بازدید ${faRelative(peerPresence.lastSeen)}`
                       : ' '}
           </Text>
-        </View>
+        </TouchableOpacity>
         {/* دکمه‌های تماس در همهٔ گفتگوها + ⏲ محوشونده + منو در ۱:۱ */}
         <View style={styles.callBtns}>
+          {isGroup ? (
+            <TouchableOpacity
+              style={styles.callBtn}
+              onPress={() => {
+                setGroupEditTitle(conversation.title ?? groupDetail?.title ?? '');
+                void refreshGroupDetail();
+                setGroupSheet(true);
+              }}
+              accessibilityLabel="مدیریت گروه"
+            >
+              <Text style={styles.callBtnIcon}>⋯</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.callBtn}
             onPress={() => requestCall('audio')}
@@ -964,6 +1081,93 @@ export function ChatScreen({
               <Text style={styles.aiModalText}>{aiResult?.text}</Text>
             </ScrollView>
             <TouchableOpacity style={styles.aiModalClose} onPress={() => setAiResult(null)}>
+              <Text style={styles.aiModalCloseText}>بستن</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* v1.5.4: مدیریت گروه — اعضا، افزودن عضو با ایمیل، تغییر نام، خروج */}
+      <Modal
+        visible={groupSheet}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setGroupSheet(false)}
+      >
+        <View style={styles.aiModalBackdrop}>
+          <View style={styles.aiModalCard}>
+            <Text style={styles.aiModalTitle}>{conversation.title ?? groupDetail?.title ?? 'گروه'}</Text>
+            <Text style={styles.groupSub}>
+              {faNum(memberCount)} عضو{canManageGroup ? ' · شما ادمین هستید' : ''}
+            </Text>
+
+            <ScrollView style={styles.groupMembers}>
+              {members.map((p) => (
+                <View key={p.userId} style={styles.groupMemberRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.groupMemberName}>
+                      {p.userId === myUserId ? 'شما' : p.displayName ?? p.phone ?? 'عضو'}
+                    </Text>
+                    {p.role === 'admin' ? <Text style={styles.groupMemberRole}>ادمین</Text> : null}
+                  </View>
+                  {canManageGroup && p.userId !== myUserId ? (
+                    <TouchableOpacity onPress={() => void removeMember(p)}>
+                      <Text style={styles.groupMemberRemove}>✕</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ))}
+            </ScrollView>
+
+            {canManageGroup ? (
+              <>
+                <Text style={styles.groupSection}>افزودن عضو با ایمیل</Text>
+                <View style={styles.groupAddRow}>
+                  <TextInput
+                    value={addEmail}
+                    onChangeText={setAddEmail}
+                    placeholder="ایمیل عضو جدید"
+                    placeholderTextColor={theme.textDim}
+                    style={styles.groupAddInput}
+                    textAlign="right"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                  <TouchableOpacity
+                    style={styles.groupAddBtn}
+                    onPress={() => void addGroupMember()}
+                    disabled={groupBusy || !addEmail.trim()}
+                  >
+                    <Text style={styles.groupAddBtnText}>{groupBusy ? '…' : 'افزودن'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.groupSection}>نام گروه</Text>
+                <View style={styles.groupAddRow}>
+                  <TextInput
+                    value={groupEditTitle}
+                    onChangeText={setGroupEditTitle}
+                    placeholder="نام گروه"
+                    placeholderTextColor={theme.textDim}
+                    style={styles.groupAddInput}
+                    textAlign="right"
+                    maxLength={60}
+                  />
+                  <TouchableOpacity
+                    style={styles.groupAddBtn}
+                    onPress={() => void renameGroupNow()}
+                    disabled={groupBusy || !groupEditTitle.trim()}
+                  >
+                    <Text style={styles.groupAddBtnText}>{groupBusy ? '…' : 'ذخیره'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
+
+            <TouchableOpacity style={styles.groupLeaveBtn} onPress={leaveGroupNow}>
+              <Text style={styles.groupLeaveText}>خروج از گروه</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.aiModalClose} onPress={() => setGroupSheet(false)}>
               <Text style={styles.aiModalCloseText}>بستن</Text>
             </TouchableOpacity>
           </View>
@@ -1247,6 +1451,54 @@ const makeStyles = (theme: DelTheme) =>
     alignItems: 'center',
   },
   aiModalCloseText: { color: '#04121F', fontWeight: '800' },
+  // ————— مدیریت گروه (v1.5.4) —————
+  groupSub: { color: theme.textDim, fontSize: fs(12), textAlign: 'center', marginTop: 2 },
+  groupMembers: { maxHeight: 180, marginTop: 12, alignSelf: 'stretch' },
+  groupMemberRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.border,
+  },
+  groupMemberName: { color: theme.text, fontSize: fs(14), fontWeight: '600' },
+  groupMemberRole: { color: theme.accent, fontSize: fs(11), marginTop: 2 },
+  groupMemberRemove: { color: '#EF4444', fontSize: 18, padding: 8 },
+  groupSection: {
+    alignSelf: 'flex-start',
+    color: theme.textDim,
+    fontSize: fs(12),
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  groupAddRow: { flexDirection: 'row-reverse', gap: 8, alignSelf: 'stretch' },
+  groupAddInput: {
+    flex: 1,
+    backgroundColor: theme.surface,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: theme.text,
+    fontSize: fs(13),
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  groupAddBtn: {
+    backgroundColor: theme.accent,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  groupAddBtnText: { color: '#FFFFFF', fontSize: fs(13), fontWeight: '700' },
+  groupLeaveBtn: {
+    marginTop: 18,
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  groupLeaveText: { color: '#EF4444', textAlign: 'center', fontSize: fs(13), fontWeight: '700' },
   // ————— گام ۱۰ —————
   blockBanner: {
     flexDirection: 'row-reverse',

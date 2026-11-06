@@ -174,7 +174,8 @@ model Message {
 model MediaAsset {
   id             String    @id @default(uuid()) @db.Uuid
   ownerId        String    @db.Uuid
-  conversationId String    @db.Uuid
+  /** گفتگوی مقصد — null برای رسانهٔ شخصی مالک (استوری) */
+  conversationId String?   @db.Uuid
   kind           String // image | video | audio | file
   mime           String // از whitelist سرور — در complete با magic bytes تأیید می‌شود
   size           Int // بایت‌های ادعاشده در presign
@@ -190,7 +191,7 @@ model MediaAsset {
   readyAt        DateTime?
 
   owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   messages     Message[]
 
   @@index([conversationId])
@@ -363,15 +364,17 @@ model AuditLog {
 model Story {
   id           String    @id @default(uuid()) @db.Uuid
   userId       String    @db.Uuid
-  /** text | image */
+  /** text | image | video */
   kind         String    @default("text")
   /** برای kind=text — حداکثر ۲۰۰ کاراکتر */
   text         String?
   /** کلید پس‌زمینهٔ متن (پالت اپ) — aurora | sunset | ocean | forest | night | bloom */
   bgKey        String    @default("aurora")
-  /** برای kind=image — بایت تصویر فشرده (کلاینت ≤1280px jpeg می‌فشرده) */
+  /** برای kind=image قدیمی — بایت تصویر فشرده در DB (مسیر legacy) */
   mediaData    Bytes?
   mediaMime    String?
+  /** برای kind=image|video تازه — ارجاع به media_assets (تصویر فشرده یا ویدیو ≤۶۰s) */
+  mediaId      String?   @db.Uuid
   /** رنگ متن روی پس‌زمینه */
   textColor    String    @default("#FFFFFF")
   createdAt    DateTime  @default(now())
@@ -384,6 +387,7 @@ model Story {
 
   @@index([expiresAt])
   @@index([userId, createdAt])
+  @@index([mediaId])
 }
 
 /** بازدید استوری — یک‌بار برای هر (استوری، کاربر) */

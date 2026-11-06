@@ -173,10 +173,26 @@ export const api = {
 
   // ————— استوری‌ها (v1.4) —————
 
-  createStory: (token: string, input: { kind: 'text' | 'image'; text?: string; bgKey?: string; imageData?: string }) =>
-    request<StoryDto>('/stories', { method: 'POST', token, body: JSON.stringify(input) }),
+  createStory: (
+    token: string,
+    input: {
+      kind: 'text' | 'image' | 'video';
+      text?: string;
+      bgKey?: string;
+      /** رسانهٔ pipeline — تصویر فشرده یا ویدیو ≤۶۰s (presign بدون گفتگو) */
+      mediaId?: string;
+      imageData?: string;
+    },
+  ) => request<StoryDto>('/stories', { method: 'POST', token, body: JSON.stringify(input) }),
 
   listStories: (token: string) => request<{ groups: StoryGroupDto[] }>('/stories', { token }),
+
+  /** URL امضاشدهٔ رسانهٔ استوری — تصویر تازه/ویدیو (کش محلی سمت این فایل) */
+  getStoryUrl: (token: string, storyId: string) =>
+    request<{ url: string; expiresAt: string; kind: string; mime: string }>(
+      `/stories/${storyId}/url`,
+      { token },
+    ),
 
   viewStory: (token: string, storyId: string) =>
     request<{ ok: true }>(`/stories/${storyId}/view`, { method: 'POST', token }),
@@ -386,7 +402,8 @@ export const api = {
   presignMedia: (
     token: string,
     input: {
-      conversationId: string;
+      /** خالی = رسانهٔ شخصی مالک (استوری) */
+      conversationId?: string;
       mime: string;
       size: number;
       originalName?: string;

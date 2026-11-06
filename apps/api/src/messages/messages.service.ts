@@ -66,7 +66,8 @@ export const E2EE_PREVIEW = '\ud83d\udd12 \u067e\u06cc\u0627\u0645 \u0631\u0645\
 interface MediaAssetDtoSource {
   id: string;
   ownerId: string;
-  conversationId: string;
+  /** null برای رسانهٔ شخصی مالک (استوری) */
+  conversationId: string | null;
   kind: string;
   mime: string;
   size: number;

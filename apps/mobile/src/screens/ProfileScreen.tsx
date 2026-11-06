@@ -65,6 +65,9 @@ export function ProfileScreen({
   const [about, setAbout] = useState(user.about ?? '');
   const [saving, setSaving] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(Date.now());
+  /** عکس انتخاب‌شده (base64 فشرده) تا «ثبت» شود */
+  const [pickedAvatarB64, setPickedAvatarB64] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   // ————— تنظیمات شخصی‌سازی —————
   const [mode, setMode] = useState<ThemeMode>(settings.mode);
@@ -97,7 +100,7 @@ export function ProfileScreen({
     })();
   }, []);
 
-  /** انتخاب منبع: گالری یا دوربین — هر دو مسیر فشرده و زیر سقف سرور می‌شوند */
+  /** انتخاب منبع: گالری یا دوربین — پیش‌نمایش می‌آید و با «ثبت عکس پروفایل» آپلود می‌شود */
   const pickAvatar = () => {
     Alert.alert('عکس پروفایل', undefined, [
       { text: 'گالری', onPress: () => void pickFrom(ImagePicker.launchImageLibraryAsync) },
@@ -124,13 +127,32 @@ export function ProfileScreen({
     });
     if (res.canceled || !res.assets[0]) return;
     try {
+      setAvatarBusy(true);
       // فشرده‌سازی محلی به ۵۱۲px — عکس خام دوربین از سقف ۵۱۲KB آواتار رد می‌شد
       const b64 = await avatarBase64(res.assets[0].uri);
-      const u = await api.uploadAvatar(accessToken, b64, 'image/jpeg');
+      // پیش‌نمایش فوری + دکمهٔ «ثبت عکس پروفایل» — هیچ‌چیز بی‌صدا نیست
+      setPickedAvatarB64(b64);
+    } catch {
+      Alert.alert('عکس پروفایل', 'پردازش عکس ناموفق بود — عکس دیگری انتخاب کنید');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  /** ثبت نهایی عکس — بعد از انتخاب، کاربر با دکمه تأیید می‌کند */
+  const confirmAvatar = async () => {
+    if (!pickedAvatarB64) return;
+    try {
+      setAvatarBusy(true);
+      const u = await api.uploadAvatar(accessToken, pickedAvatarB64, 'image/jpeg');
       onUpdated(u);
+      setPickedAvatarB64(null);
       setAvatarVersion(Date.now());
+      Alert.alert('ثبت شد ✓', 'عکس پروفایل شما ذخیره شد');
     } catch (e) {
       Alert.alert('عکس پروفایل', e instanceof ApiError ? faError(e) : 'آپلود ناموفق بود');
+    } finally {
+      setAvatarBusy(false);
     }
   };
 
@@ -184,17 +206,24 @@ export function ProfileScreen({
       {/* ————— کارت هویت ————— */}
       <View style={styles.hero}>
         <TouchableOpacity onPress={pickAvatar} onLongPress={user.avatarUrl ? removeAvatar : undefined}>
-          {avatarUri ? (
+          {pickedAvatarB64 ? (
+            <Image source={{ uri: `data:image/jpeg;base64,${pickedAvatarB64}` }} style={styles.avatar} />
+          ) : avatarUri ? (
             <Image
               source={{ uri: `${avatarUri}${avatarUri.includes('?') ? '&' : '?'}t=${avatarVersion}` }}
               style={styles.avatar}
             />
           ) : (
             <View style={[styles.avatar, styles.avatarEmpty]}>
-              <Text style={styles.avatarPlus}>📷</Text>
+              <Text style={styles.avatarPlus}>{avatarBusy ? '…' : '📷'}</Text>
             </View>
           )}
         </TouchableOpacity>
+        {pickedAvatarB64 ? (
+          <TouchableOpacity style={styles.confirmAvatarBtn} onPress={() => void confirmAvatar()} disabled={avatarBusy}>
+            <Text style={styles.confirmAvatarText}>{avatarBusy ? 'در حال ثبت…' : '✓ ثبت عکس پروفایل'}</Text>
+          </TouchableOpacity>
+        ) : null}
         <Title>{user.displayName ?? 'کاربر دل'}</Title>
         <Text style={styles.email}>{user.email ?? user.phone ?? '—'}</Text>
         <Text style={styles.joined}>
@@ -368,6 +397,14 @@ const makeStyles = (theme: DelTheme) =>
       justifyContent: 'center',
     },
     avatarPlus: { fontSize: 36 },
+    confirmAvatarBtn: {
+      marginTop: 10,
+      backgroundColor: theme.accent,
+      borderRadius: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 18,
+    },
+    confirmAvatarText: { color: '#fff', fontSize: 14, fontWeight: '600' },
     email: {
       color: theme.textDim,
       fontSize: fs(15),

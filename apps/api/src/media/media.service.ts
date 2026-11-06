@@ -90,7 +90,8 @@ function magicCompatible(claimedMime: string, magic: string): boolean {
 interface MediaRow {
   id: string;
   ownerId: string;
-  conversationId: string;
+  /** null برای رسانهٔ شخصی مالک (استوری) */
+  conversationId: string | null;
   kind: string;
   mime: string;
   size: number;
@@ -240,7 +241,7 @@ export class MediaService implements OnModuleDestroy {
   async presign(
     meId: string,
     input: {
-      conversationId: string;
+      conversationId?: string;
       mime: string;
       size: number;
       originalName?: string;
@@ -250,7 +251,10 @@ export class MediaService implements OnModuleDestroy {
     publicBase?: string,
   ): Promise<PresignResponse> {
     this.assertStorage();
-    await this.requireParticipant(meId, input.conversationId);
+    // بدون گفتگو → رسانهٔ شخصی مالک (استوری) — مشارکت چک نمی‌شود
+    if (input.conversationId) {
+      await this.requireParticipant(meId, input.conversationId);
+    }
 
     const mime = input.mime.toLowerCase().trim();
     const rule = MIME_RULES[mime];
@@ -269,14 +273,14 @@ export class MediaService implements OnModuleDestroy {
     const asset = await this.prisma.mediaAsset.create({
       data: {
         ownerId: meId,
-        conversationId: input.conversationId,
+        conversationId: input.conversationId ?? null,
         kind: rule.kind,
         mime,
         size: input.size,
         originalName: input.originalName?.trim().slice(0, 255) || null,
         width: input.width ?? null,
         height: input.height ?? null,
-        storageKey: `${input.conversationId}/${crypto.randomUUID()}`,
+        storageKey: `${input.conversationId ?? 'story'}/${crypto.randomUUID()}`,
       },
     });
 
@@ -384,12 +388,12 @@ export class MediaService implements OnModuleDestroy {
         );
       }
 
-      // اندازه واقعی
+      // اندازه واقعی — اگر مالک اندازه را نمی‌دانسته (۰)، اندازهٔ واقعی ثبت می‌شود
       const head = await s3.send(
         new HeadObjectCommand({ Bucket: this.cfg.s3Bucket, Key: asset.storageKey }),
       );
       const actualSize = head.ContentLength ?? 0;
-      if (actualSize !== asset.size) {
+      if (asset.size > 0 && actualSize !== asset.size) {
         throw httpError(
           400,
           'MEDIA_SIZE_MISMATCH',
@@ -420,7 +424,14 @@ export class MediaService implements OnModuleDestroy {
 
       const updated = await this.prisma.mediaAsset.update({
         where: { id: asset.id },
-        data: { status: 'ready', thumbKey, readyAt: new Date(), error: null },
+        data: {
+          status: 'ready',
+          thumbKey,
+          readyAt: new Date(),
+          error: null,
+          // اندازهٔ اعلام‌نشده → اندازهٔ واقعی
+          ...(asset.size === 0 ? { size: actualSize } : {}),
+        },
       });
       this.logger.log(`media ready ${asset.id} (${asset.kind}, ${actualSize}B, thumb=${Boolean(thumbKey)})`);
       this.events.emit('media.ready', { conversationId: asset.conversationId, media: toMediaDto(updated) });
@@ -442,7 +453,7 @@ export class MediaService implements OnModuleDestroy {
       if (!st) {
         throw httpError(400, 'MEDIA_NOT_UPLOADED', 'File bytes never reached the server — retry the upload');
       }
-      if (st.size !== asset.size) {
+      if (asset.size > 0 && st.size !== asset.size) {
         throw httpError(
           400,
           'MEDIA_SIZE_MISMATCH',
@@ -472,7 +483,13 @@ export class MediaService implements OnModuleDestroy {
 
       const updated = await this.prisma.mediaAsset.update({
         where: { id: asset.id },
-        data: { status: 'ready', thumbKey, readyAt: new Date(), error: null },
+        data: {
+          status: 'ready',
+          thumbKey,
+          readyAt: new Date(),
+          error: null,
+          ...(asset.size === 0 ? { size: st.size } : {}),
+        },
       });
       this.logger.log(`media ready(local) ${asset.id} (${asset.kind}, ${st.size}B, thumb=${Boolean(thumbKey)})`);
       this.events.emit('media.ready', { conversationId: asset.conversationId, media: toMediaDto(updated) });
@@ -634,6 +651,13 @@ export class MediaService implements OnModuleDestroy {
   private async getAssetChecked(meId: string, mediaId: string): Promise<MediaRow> {
     const asset = await this.prisma.mediaAsset.findUnique({ where: { id: mediaId } });
     if (!asset) throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
+    if (asset.conversationId === null) {
+      // رسانهٔ شخصی مالک (استوری) — فقط خودش
+      if (asset.ownerId !== meId) {
+        throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
+      }
+      return asset;
+    }
     await this.requireParticipant(meId, asset.conversationId);
     return asset;
   }
@@ -686,5 +710,67 @@ export class MediaService implements OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.s3?.destroy();
+  }
+
+  // ————— رسانهٔ استوری — مالکیت/دسترسی را StoriesService کنترل می‌کند —————
+
+  /** URL امضاشدهٔ دانلود بدون چک مشارکتِ گفتگو — فقط asset آمادهٔ متعلق به ساختار استوری.
+   *  فراخواننده (StoriesService) باید دیده‌شدن استوری را خودش تأیید کرده باشد. */
+  async mintUrlForAsset(
+    assetId: string,
+    variant: 'thumb' | 'original' = 'original',
+    publicBase?: string,
+  ): Promise<{ url: string; expiresAt: string; kind: string; mime: string; size: number }> {
+    this.assertStorage();
+    const asset = await this.prisma.mediaAsset.findUnique({ where: { id: assetId } });
+    if (!asset || asset.status !== 'ready') {
+      throw httpError(404, 'MEDIA_NOT_FOUND', 'Media asset does not exist');
+    }
+    if (this.localMode) {
+      const expires = Math.floor(Date.now() / 1000) + this.cfg.mediaSignedUrlTtlSec;
+      const sig = this.localSig(`dl:${asset.id}:${variant}:${expires}`);
+      const base = (publicBase ?? '').replace(/\/+$/, '');
+      return {
+        url: `${base}/api/v1/media/local/${asset.id}?variant=${variant}&expires=${expires}&sig=${sig}`,
+        expiresAt: new Date(expires * 1000).toISOString(),
+        kind: asset.kind,
+        mime: asset.mime,
+        size: asset.size,
+      };
+    }
+    const key = variant === 'thumb' && asset.thumbKey ? asset.thumbKey : asset.storageKey;
+    const url = await getSignedUrl(
+      this.s3!,
+      new GetObjectCommand({ Bucket: this.cfg.s3Bucket, Key: key }),
+      { expiresIn: this.cfg.mediaSignedUrlTtlSec },
+    );
+    return {
+      url,
+      expiresAt: new Date(Date.now() + this.cfg.mediaSignedUrlTtlSec * 1000).toISOString(),
+      kind: asset.kind,
+      mime: asset.mime,
+      size: asset.size,
+    };
+  }
+
+  /** حذف کامل asset — ردیف DB + فایل/آبجکت (پاک‌سازی استوری منقضی) */
+  async deleteAssetHard(assetId: string): Promise<void> {
+    const asset = await this.prisma.mediaAsset.findUnique({ where: { id: assetId } }).catch(() => null);
+    if (!asset) return;
+    await this.prisma.mediaAsset.delete({ where: { id: assetId } }).catch(() => undefined);
+    if (this.localMode) {
+      await fsp.rm(this.localPath(asset.storageKey), { force: true }).catch(() => undefined);
+      await fsp.rm(`${this.localPath(asset.storageKey)}.thumb.jpg`, { force: true }).catch(() => undefined);
+      return;
+    }
+    if (!this.s3) return;
+    await this.s3
+      .send(new DeleteObjectCommand({ Bucket: this.cfg.s3Bucket, Key: asset.storageKey }))
+      .catch(() => undefined);
+    if (asset.thumbKey) {
+      await this.s3
+        .send(new DeleteObjectCommand({ Bucket: this.cfg.s3Bucket, Key: asset.thumbKey }))
+        .catch(() => undefined);
+    }
   }
 }

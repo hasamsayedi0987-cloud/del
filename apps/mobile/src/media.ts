@@ -1,9 +1,11 @@
 /**
  * گام ۵ — رسانه سمت موبایل
- * آپلود مستقیم به S3 با Presigned URL (single یا multipart) — بایت‌ها از API عبور نمی‌کنند.
+ * آپلود مستقیم با Presigned URL (single یا multipart) — بایت‌ها از API عبور نمی‌کنند.
+ * PUT با uploadAsync نیتیو انجام می‌شود (fetch در RN با file:// و اندازهٔ بدنه مشکل داشت).
  * + کش URL امضاشده دانلود برای نمایش تصاویر.
  */
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getApiBaseUrl } from './config';
 import { api } from './api';
 import type { MediaAssetDto, PresignResponse } from '@del/shared-types';
@@ -18,26 +20,30 @@ export interface PickFile {
   height?: number;
 }
 
-/** آپلود کامل: خواندن بایت‌ها → presign با اندازهٔ واقعی → PUT مستقیم → complete */
+/** اندازهٔ فایل محلی — getInfoAsync دقیق است؛ اگر نشد اعلام‌شدهٔ picker؛ ۰ = نامعلوم */
+async function fileSizeOf(uri: string, fallback: number): Promise<number> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists && typeof (info as { size?: number }).size === 'number' && (info as { size?: number }).size! > 0) {
+      return (info as { size?: number }).size!;
+    }
+  } catch {
+    // content:// — بی‌خیال؛ سرور اندازهٔ نامعلوم (۰) را با اندازهٔ واقعی جبران می‌کند
+  }
+  return fallback;
+}
+
+/** آپلود کامل: اندازهٔ محلی → presign → PUT نیتیو → complete.
+ *  conversationId خالی = رسانهٔ شخصی مالک (استوری) */
 export async function uploadMedia(
   token: string,
-  conversationId: string,
+  conversationId: string | null,
   file: PickFile,
 ): Promise<MediaAssetDto> {
-  // بایت‌ها اول خوانده می‌شوند — دو دلیل:
-  //  ۱) asset.fileSize روی اندروید اغلب undefined است؛ presign با size=0 باعث
-  //     MEDIA_SIZE_MISMATCH در complete می‌شد (باگ «آپلود فایل ناموفق بود»).
-  //  ۲) Response.arrayBuffer() در React Native همیشه هست؛ Blob.arrayBuffer() نیست.
-  const res = await fetch(file.uri);
-  if (!res.ok && res.status !== 200) {
-    throw new Error(`cannot read file: ${res.status}`);
-  }
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  const size = bytes.byteLength || file.size;
-  if (!size) throw new Error('empty file');
+  const size = await fileSizeOf(file.uri, file.size);
 
   const pre: PresignResponse = await api.presignMedia(token, {
-    conversationId,
+    ...(conversationId ? { conversationId } : {}),
     mime: file.mime,
     size,
     originalName: file.name,
@@ -46,13 +52,20 @@ export async function uploadMedia(
   });
 
   if (pre.mode === 'single' && pre.url) {
-    const put = await fetch(pre.url, {
-      method: 'PUT',
+    // PUT نیتیو — BINARY_CONTENT خودش بایت‌های فایل را می‌خواند؛
+    // با file:// و content:// کار می‌کند و وابسته به fetch/Blob در RN نیست
+    const res = await FileSystem.uploadAsync(pre.url, file.uri, {
+      httpMethod: 'PUT',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
       headers: { 'Content-Type': file.mime },
-      body: bytes as unknown as Blob,
     });
-    if (!put.ok) throw new Error(`upload failed: ${put.status}`);
+    if (res.status !== 200 && res.status !== 201) {
+      throw new Error(`upload failed: ${res.status} ${String(res.body ?? '').slice(0, 120)}`);
+    }
   } else if (pre.mode === 'multipart' && pre.partUrls && pre.partSize) {
+    // فقط حالت S3 با فایل >۱۰MB — بخش‌بخش با fetch
+    const blob = await (await fetch(file.uri)).blob();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
     const parts: { partNumber: number; etag: string }[] = [];
     for (let i = 0; i < pre.partUrls.length; i++) {
       const partUrl = pre.partUrls[i]!;
@@ -121,4 +134,15 @@ export async function avatarBase64(uri: string): Promise<string> {
   );
   if (!out.base64) throw new Error('resize failed');
   return out.base64;
+}
+
+// ————— استوری تصویری — فشرده‌سازی تا ۱۰۸۰px و خروجی فایل برای آپلود pipeline —————
+
+export async function storyImageFile(uri: string): Promise<{ uri: string; width?: number; height?: number }> {
+  const out = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize: { width: 1080 } }],
+    { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG },
+  );
+  return { uri: out.uri, width: out.width, height: out.height };
 }

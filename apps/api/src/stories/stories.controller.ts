@@ -13,9 +13,10 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { JwtAuthGuard } from '../common/jwt-auth.guard';
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { JwtAuthGuard, AuthedRequest } from '../common/jwt-auth.guard';
 import { PrismaService } from '../infra/prisma.service';
+import { MediaService } from '../media/media.service';
 import { StoriesService } from './stories.service';
 import type { StoryDto, StoryGroupDto } from '@del/shared-types';
 
@@ -23,7 +24,7 @@ import type { StoryDto, StoryGroupDto } from '@del/shared-types';
  * نکته: این DTO باید decorator داشته باشد — ValidationPipe سراسری با
  * whitelist:true فیلدهای بدون decorator را حذف می‌کند و متن استوری «خالی» می‌شد.
  */
-const STORY_KINDS = ['text', 'image'] as const;
+const STORY_KINDS = ['text', 'image', 'video'] as const;
 
 class CreateStoryDto {
   @IsIn(STORY_KINDS)
@@ -44,7 +45,12 @@ class CreateStoryDto {
   @MaxLength(16)
   textColor?: string;
 
-  /** تصویر base64 (بدون پیشوند data:) — فقط برای kind=image */
+  /** مسیر تازه — asset آمادهٔ pipeline (تصویر فشرده یا ویدیو ≤۶۰s) متعلق به خودم */
+  @IsOptional()
+  @IsUUID()
+  mediaId?: string;
+
+  /** مسیر legacy — تصویر base64 (بدون پیشوند data:) — فقط برای kind=image */
   @IsOptional()
   @IsString()
   @MaxLength(4 * 1024 * 1024)
@@ -62,6 +68,7 @@ export class StoriesController {
   constructor(
     private readonly stories: StoriesService,
     private readonly prisma: PrismaService,
+    private readonly media: MediaService,
   ) {}
 
   @Post()
@@ -74,10 +81,10 @@ export class StoriesController {
     return this.stories.list(req.user.sub);
   }
 
-  /** بایت تصویر استوری — با کش مرورگر/CDN */
+  /** بایت تصویر استوری قدیمی (مسیر legacy در DB) — با کش مرورگر/CDN */
   @Get(':id/media')
   @Header('Cache-Control', 'private, max-age=86400')
-  async media(
+  async legacyMedia(
     @Req() req: { user: { sub: string } },
     @Param('id') id: string,
     @Res() res: Response,
@@ -94,6 +101,17 @@ export class StoriesController {
       });
     }
     res.type(s.mediaMime ?? 'image/jpeg').send(Buffer.from(s.mediaData));
+  }
+
+  /** URL امضاشدهٔ رسانهٔ استوری (تصویر تازه/ویدیو) — دسترسی با گفتگوی مشترک چک می‌شود */
+  @Get(':id/url')
+  async url(@Req() req: AuthedRequest, @Param('id') id: string): Promise<{
+    url: string;
+    expiresAt: string;
+    kind: string;
+    mime: string;
+  }> {
+    return this.stories.urlFor(req.user.sub, id, this.media.publicBaseOf(req));
   }
 
   @Post(':id/view')
