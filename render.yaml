@@ -21,16 +21,29 @@ services:
         generateValue: true
       # بدون SMTP تنظیم‌شده، کد ورود در پاسخ API به اپ برمی‌گردد (نمایش داخل اپ)
       # برای ایمیل واقعی: SMTP_HOST/SMTP_USER/SMTP_PASS/SMTP_FROM را در پنل Render پر کنید
+      # مثال Gmail: SMTP_HOST=smtp.gmail.com  SMTP_PORT=465  SMTP_USER=hsayedi1377@gmail.com
+      #             SMTP_PASS=App Password شانزده‌رقمی (myaccount.google.com/apppasswords)  SMTP_FROM=دل <hsayedi1377@gmail.com>
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
-        value: "587"
+        value: "465"
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
         sync: false
       - key: SMTP_FROM
         sync: false
+      # تماس صوتی/تصویری — از livekit.cloud (رایگان): بعد از ساخت پروژه،
+      # LIVEKIT_URL=wss://…  و LIVEKIT_API_KEY / LIVEKIT_API_SECRET از بخش Keys
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      # پایهٔ URL عمومی رسانهٔ حالت لوکال — تضمین https برای URLهای امضاشدهٔ آپلود/دانلود
+      - key: MEDIA_LOCAL_PUBLIC_BASE
+        value: "https://del-messenger-api.onrender.com"
       - key: ADMIN_EMAILS
         sync: false
       # Redis لازم نیست — fallback حافظه‌ای فعال است
