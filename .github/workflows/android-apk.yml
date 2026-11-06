@@ -33,6 +33,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # پکیج‌های workspace باید dist بسازند؛ metro هنگام bundle به main=dist/index.js
+      # اشاره می‌کند و بدون این مرحله createBundleReleaseJsAndAssets مردود می‌شود
+      - name: Build workspace packages (@del/e2ee, @del/shared-types)
+        run: pnpm --filter @del/e2ee --filter @del/shared-types build
+
       - name: Generate native Android project (expo prebuild)
         run: pnpm --filter @del/mobile exec expo prebuild -p android --no-install
 
