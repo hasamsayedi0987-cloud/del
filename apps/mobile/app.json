@@ -2,7 +2,7 @@
   "expo": {
     "name": "دل",
     "slug": "del",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "orientation": "portrait",
     "scheme": "del",
     "userInterfaceStyle": "automatic",
@@ -26,7 +26,7 @@
     },
     "android": {
       "package": "ir.del.app",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A1628"

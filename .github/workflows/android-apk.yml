@@ -36,6 +36,19 @@ jobs:
       - name: Generate native Android project (expo prebuild)
         run: pnpm --filter @del/mobile exec expo prebuild -p android --no-install
 
+      # prebuild پروژهٔ android را از نو تولید می‌کند؛ بدون این مرحله keystore تصادفی و
+      # ABIهای اضافی می‌گیریم — امضای پایدار شرط نصب به‌روزشده روی نسخهٔ نصب‌شدهٔ کاربر است
+      - name: Restore stable signing + v1.4 build profile
+        run: |
+          cp apps/mobile/keystores/debug.keystore apps/mobile/android/app/debug.keystore
+          sed -i 's/^newArchEnabled=.*/newArchEnabled=false/' apps/mobile/android/gradle.properties
+          if grep -q '^reactNativeArchitectures=' apps/mobile/android/gradle.properties; then
+            sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a/' apps/mobile/android/gradle.properties
+          else
+            echo 'reactNativeArchitectures=arm64-v8a' >> apps/mobile/android/gradle.properties
+          fi
+          grep -E 'newArchEnabled|reactNativeArchitectures' apps/mobile/android/gradle.properties
+
       - name: Build debug APK
         run: |
           cd apps/mobile/android

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Text, StyleSheet } from 'react-native';
+import Constants from 'expo-constants';
 import { api, ApiError } from '../api';
 import { theme } from '../theme';
 import { Button, Input, Logo, Screen, Subtitle, Title } from '../components/ui';
@@ -54,6 +55,9 @@ export function LoginEmailScreen({
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Button label="ارسال کد" onPress={submit} busy={busy} disabled={email.trim().length < 5} />
+
+      {/* شمارهٔ نسخه برای پشتیبانی — کاربر با یک نگاه می‌فهمد نصب جدید است یا نه */}
+      <Text style={styles.version}>دل نسخهٔ {Constants.expoConfig?.version ?? '—'}</Text>
     </Screen>
   );
 }
@@ -64,5 +68,11 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 12,
     fontSize: 14,
+  },
+  version: {
+    color: theme.textDim,
+    textAlign: 'center',
+    marginTop: 28,
+    fontSize: 13,
   },
 });
