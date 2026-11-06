@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { api, ApiError, absoluteUrl } from '../api';
+import { avatarBase64 } from '../media';
 import {
   WALLPAPER_CHOICES,
   fs,
@@ -96,22 +97,36 @@ export function ProfileScreen({
     })();
   }, []);
 
-  const pickAvatar = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  /** انتخاب منبع: گالری یا دوربین — هر دو مسیر فشرده و زیر سقف سرور می‌شوند */
+  const pickAvatar = () => {
+    Alert.alert('عکس پروفایل', undefined, [
+      { text: 'گالری', onPress: () => void pickFrom(ImagePicker.launchImageLibraryAsync) },
+      { text: 'دوربین', onPress: () => void pickFrom(ImagePicker.launchCameraAsync) },
+      { text: 'انصراف', style: 'cancel' },
+    ]);
+  };
+
+  const pickFrom = async (
+    launch: typeof ImagePicker.launchImageLibraryAsync,
+  ) => {
+    const perm = launch === ImagePicker.launchCameraAsync
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('دسترسی', 'برای انتخاب عکس، دسترسی گالری را بدهید');
+      Alert.alert('دسترسی', 'برای انتخاب عکس، دسترسی را بدهید');
       return;
     }
-    const res = await ImagePicker.launchImageLibraryAsync({
+    const res = await launch({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
-      base64: true,
+      quality: 0.7,
     });
-    if (res.canceled || !res.assets[0]?.base64) return;
+    if (res.canceled || !res.assets[0]) return;
     try {
-      const u = await api.uploadAvatar(accessToken, res.assets[0].base64, 'image/jpeg');
+      // فشرده‌سازی محلی به ۵۱۲px — عکس خام دوربین از سقف ۵۱۲KB آواتار رد می‌شد
+      const b64 = await avatarBase64(res.assets[0].uri);
+      const u = await api.uploadAvatar(accessToken, b64, 'image/jpeg');
       onUpdated(u);
       setAvatarVersion(Date.now());
     } catch (e) {

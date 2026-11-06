@@ -37,6 +37,20 @@ export function faError(e: ApiError): string {
       return 'تعداد درخواست‌های هوش مصنوعی زیاد است؛ کمی بعد تلاش کنید';
     case 'AI_PROVIDER_ERROR':
       return 'سرویس هوش مصنوعی موقتاً در دسترس نیست';
+    case 'MIME_NOT_ALLOWED':
+      return 'این نوع فایل پشتیبانی نمی‌شود';
+    case 'MEDIA_TOO_LARGE':
+      return 'حجم فایل بیش از حد مجاز است';
+    case 'MEDIA_SIZE_MISMATCH':
+      return 'آپلود ناقص بود — دوباره تلاش کنید';
+    case 'MAGIC_MISMATCH':
+      return 'محتوای فایل با نوع اعلام‌شده سازگار نیست';
+    case 'MEDIA_NOT_READY':
+      return 'آپلود هنوز نهایی نشده — چند لحظه بعد تلاش کنید';
+    case 'CALLS_DISABLED':
+      return 'تماس‌ها هنوز روی سرور فعال نشده — مدیر باید متغیرهای LiveKit را تنظیم کند';
+    case 'CALL_BUSY':
+      return 'طرف مقابل یا شما در تماس دیگری هستید';
     case 'NETWORK':
       // بیدار شدن سرور از حالت خواب (پلن رایگان) ممکن است اولین درخواست را ناموفق کند
       return `${e.message} — چند لحظه صبر کنید و دوباره تلاش کنید`;

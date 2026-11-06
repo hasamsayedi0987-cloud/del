@@ -14,10 +14,12 @@ import {
   StyleSheet,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { api, ApiError } from '../api';
 import { getSignedUrl, uploadMedia } from '../media';
 import { getSocket, uuid } from '../socket';
 import { fs, getThemeSettings, useTheme, wallpaperSource, type DelTheme, type WallpaperKey } from '../theme';
+import { faError } from '../faError';
 import { ImageBackground } from 'react-native';
 import { loadMessages, saveMessages } from '../cache';
 import {
@@ -450,25 +452,22 @@ export function ChatScreen({
     };
   }, [accessToken, convId, peerId, upsert, isGroup, myUserId, senderName, tryDecrypt]);
 
-  /** ارسال پیام رسانه‌ای — آپلود مستقیم به S3 سپس پیام با mediaId */
-  const sendMedia = useCallback(async () => {
+  /** منوی پیوست — گالری / دوربین / فایل */
+  const attach = useCallback(() => {
     if (uploading) return;
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('دسترسی لازم است', 'برای ارسال عکس، دسترسی گالری را تأیید کنید.');
-        return;
-      }
-      const picked = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images', 'videos'],
-        quality: 0.8,
-        allowsMultipleSelection: false,
-      });
-      if (picked.canceled || !picked.assets[0]) return;
-      const asset = picked.assets[0];
-      const mime = asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
-      const name = asset.fileName ?? `del-${Date.now()}.${mime.split('/')[1] ?? 'bin'}`;
+    Alert.alert('پیوست', undefined, [
+      { text: '🖼 گالری — عکس/ویدیو', onPress: () => void sendPicked(false) },
+      { text: '📷 دوربین', onPress: () => void sendPicked(true) },
+      { text: '📄 فایل (PDF، سند، …)', onPress: () => void sendDocument() },
+      { text: 'انصراف', style: 'cancel' },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploading, accessToken, convId, myUserId, draft]);
 
+  /** آپلود و ارسال هر فایل انتخاب‌شده (عکس/ویدیو/سند) */
+  const uploadAndSend = useCallback(
+    async (file: { uri: string; mime: string; name: string; size: number; width?: number; height?: number; isVideo: boolean }) => {
+      if (uploading) return;
       setUploading(true);
       const clientMsgId = uuid();
       // حباب موقت تا پایان آپلود
@@ -478,24 +477,24 @@ export function ChatScreen({
         senderId: myUserId,
         serverSeq: Number.MAX_SAFE_INTEGER,
         clientMsgId,
-        type: 'image',
+        type: file.isVideo ? 'video' : file.mime.startsWith('image/') ? 'image' : 'file',
         body: '',
         media: null,
         createdAt: new Date().toISOString(),
         editedAt: null,
         deletedAt: null,
         status: 'sending',
-        pendingLabel: asset.type === 'video' ? 'در حال ارسال ویدیو…' : 'در حال ارسال عکس…',
+        pendingLabel: file.isVideo ? 'در حال ارسال ویدیو…' : file.mime.startsWith('image/') ? 'در حال ارسال عکس…' : 'در حال ارسال فایل…',
       });
 
       try {
         const media = await uploadMedia(accessToken, convId, {
-          uri: asset.uri,
-          mime,
-          size: asset.fileSize ?? 0,
-          name,
-          width: asset.width,
-          height: asset.height,
+          uri: file.uri,
+          mime: file.mime,
+          size: file.size,
+          name: file.name,
+          width: file.width,
+          height: file.height,
         });
         const caption = draft.trim();
         setDraft('');
@@ -516,14 +515,14 @@ export function ChatScreen({
           const r = await api.sendMessageRest(accessToken, convId, clientMsgId, caption || undefined, media.id);
           upsert({ ...r.message, status: 'sent' });
         }
-      } catch {
+      } catch (e) {
         upsert({
           id: clientMsgId,
           conversationId: convId,
           senderId: myUserId,
           serverSeq: Number.MAX_SAFE_INTEGER,
           clientMsgId,
-          type: 'image',
+          type: file.isVideo ? 'video' : file.mime.startsWith('image/') ? 'image' : 'file',
           body: '',
           media: null,
           createdAt: new Date().toISOString(),
@@ -531,12 +530,59 @@ export function ChatScreen({
           deletedAt: null,
           status: 'failed',
         });
-        Alert.alert('خطا', 'آپلود فایل ناموفق بود.');
+        Alert.alert('خطا', e instanceof ApiError ? faError(e) : 'آپلود فایل ناموفق بود.');
+      } finally {
+        setUploading(false);
       }
-    } finally {
-      setUploading(false);
+    },
+    [uploading, accessToken, convId, myUserId, draft, upsert],
+  );
+
+  /** عکس/ویدیو از گالری یا دوربین */
+  const sendPicked = useCallback(async (useCamera: boolean) => {
+    const perm = useCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('دسترسی لازم است', useCamera ? 'برای گرفتن عکس، دسترسی دوربین را تأیید کنید.' : 'برای ارسال عکس، دسترسی گالری را تأیید کنید.');
+      return;
     }
-  }, [uploading, accessToken, convId, myUserId, draft, upsert]);
+    const picked = await (useCamera
+      ? ImagePicker.launchCameraAsync({ quality: 0.8 })
+      : ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images', 'videos'],
+          quality: 0.8,
+          allowsMultipleSelection: false,
+        }));
+    if (picked.canceled || !picked.assets[0]) return;
+    const asset = picked.assets[0];
+    await uploadAndSend({
+      uri: asset.uri,
+      mime: asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+      name: asset.fileName ?? `del-${Date.now()}.${(asset.mimeType ?? 'image/jpeg').split('/')[1] ?? 'bin'}`,
+      size: asset.fileSize ?? 0,
+      width: asset.width,
+      height: asset.height,
+      isVideo: asset.type === 'video',
+    });
+  }, [uploadAndSend]);
+
+  /** سند از فایل‌های دستگاه — PDF، آفیس، ZIP، متن، صدا… */
+  const sendDocument = useCallback(async () => {
+    const res = await DocumentPicker.getDocumentAsync({
+      multiple: false,
+      copyToCacheDirectory: true,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    await uploadAndSend({
+      uri: a.uri,
+      mime: a.mimeType ?? 'application/octet-stream',
+      name: a.name,
+      size: a.size ?? 0,
+      isVideo: false,
+    });
+  }, [uploadAndSend]);
 
   const send = useCallback(async () => {
     const body = draft.trim();
@@ -856,7 +902,7 @@ export function ChatScreen({
                     {item.body}
                   </Text>
                 ) : null}
-                {aiAble ? <Text style={styles.aiHint}>نگه‌دارید: ترجمه ✨</Text> : null}
+                {/* ترجمه با نگه‌داشتن پیام طرف مقابل — راهنمای آن یک‌بار در هدر گفتگو آمده؛ برچسب روی هر حباب شلوغ می‌کرد */}
                 {mine && item.status === 'sending' ? (
                   <Text style={styles.status}>{item.pendingLabel ?? '… در حال ارسال'}</Text>
                 ) : null}
@@ -985,9 +1031,9 @@ export function ChatScreen({
       <View style={styles.composer}>
         <TouchableOpacity
           style={styles.attachBtn}
-          onPress={sendMedia}
+          onPress={attach}
           disabled={uploading}
-          accessibilityLabel="ارسال عکس یا ویدیو"
+          accessibilityLabel="پیوست عکس، دوربین یا فایل"
         >
           <Text style={styles.attachIcon}>{uploading ? '…' : '📎'}</Text>
         </TouchableOpacity>

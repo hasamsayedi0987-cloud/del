@@ -54,26 +54,26 @@ export class MockAiProvider implements AiProvider {
     switch (input.feature) {
       case 'translate':
         return {
-          text: `[ترجمهٔ آزمایشی mock → ${input.target ?? 'fa'}] ${input.user}`,
+          text: `[ترجمهٔ آزمایشی → ${input.target ?? 'fa'}] ${input.user}`,
           completionTokens: Math.ceil(t / 4),
         };
       case 'fix':
         return {
-          text: `[متن اصلاح‌شدهٔ mock] ${input.user.replace(/\s+/g, ' ').trim()}`,
+          text: `[متن اصلاح‌شده — حالت آزمایشی] ${input.user.replace(/\s+/g, ' ').trim()}`,
           completionTokens: Math.ceil(t / 4),
         };
       case 'suggest':
         return {
           text: [
-            'پیشنهاد ۱ (mock): ممنون، خیلی خوب بود!',
-            'پیشنهاد ۲ (mock): باشه، بعداً بررسی می‌کنم.',
-            'پیشنهاد ۳ (mock): حتماً، خبرم کن.',
+            'پیشنهاد ۱ (آزمایشی): ممنون، خیلی خوب بود!',
+            'پیشنهاد ۲ (آزمایشی): باشه، بعداً بررسی می‌کنم.',
+            'پیشنهاد ۳ (آزمایشی): حتماً، خبرم کن.',
           ].join('\n'),
           completionTokens: 24,
         };
       case 'summarize':
         return {
-          text: `خلاصهٔ آزمایشی mock — ${input.user.split('\n').filter(Boolean).length} پیام بررسی شد؛ موضوع اصلی گفتگو در پیام اول مطرح شده و پاسخ‌ها در ادامه آمده‌اند.`,
+          text: `خلاصهٔ آزمایشی — ${input.user.split('\n').filter(Boolean).length} پیام بررسی شد؛ موضوع اصلی گفتگو در پیام اول مطرح شده و پاسخ‌ها در ادامه آمده‌اند. برای خلاصهٔ واقعی، سرویس هوش مصنوعی سرور را با کلید API تنظیم کنید.`,
           completionTokens: 40,
         };
       default:

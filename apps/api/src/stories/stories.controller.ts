@@ -12,18 +12,47 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { ApiTags } from '@nestjs/swagger';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { PrismaService } from '../infra/prisma.service';
 import { StoriesService } from './stories.service';
 import type { StoryDto, StoryGroupDto } from '@del/shared-types';
 
+/**
+ * نکته: این DTO باید decorator داشته باشد — ValidationPipe سراسری با
+ * whitelist:true فیلدهای بدون decorator را حذف می‌کند و متن استوری «خالی» می‌شد.
+ */
+const STORY_KINDS = ['text', 'image'] as const;
+
 class CreateStoryDto {
-  kind: 'text' | 'image';
+  @IsIn(STORY_KINDS)
+  kind!: (typeof STORY_KINDS)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
   text?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
   bgKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
   textColor?: string;
+
   /** تصویر base64 (بدون پیشوند data:) — فقط برای kind=image */
+  @IsOptional()
+  @IsString()
+  @MaxLength(4 * 1024 * 1024)
   imageData?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
   imageMime?: string;
 }
 

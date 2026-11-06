@@ -39,8 +39,9 @@ async function bootstrap(): Promise<void> {
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   });
   app.disable('x-powered-by');
-  // v1.4: استوری/آواتار به‌صورت base64 از API می‌آیند — سقف ۲ مگابایت کافی است
-  app.useBodyParser('json', { limit: '2mb' });
+  // v1.5.3: استوری/آواتار به‌صورت base64 از API می‌آیند — base64 حجم را ×۴/۳ می‌کند؛
+  // تصویر ۲MB استوری ≈ ۲٫۷MB پایه‌۶۴ — سقف ۴MB با حاشیهٔ امن
+  app.useBodyParser('json', { limit: '4mb' });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

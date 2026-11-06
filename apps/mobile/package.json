@@ -22,6 +22,8 @@
     "expo-constants": "~18.0.9",
     "expo-crypto": "~15.0.9",
     "expo-device": "~8.0.9",
+    "expo-document-picker": "~14.0.8",
+    "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "^17.0.11",
     "expo-notifications": "~0.32.12",
     "expo-secure-store": "~15.0.0",

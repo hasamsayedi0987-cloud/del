@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Alert, Image, Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { api, ApiError } from '../api';
+import { avatarBase64 } from '../media';
 import { fs, useTheme, type DelTheme } from '../theme';
 import { Button, Logo, Screen, Subtitle, Title } from '../components/ui';
 import { faError } from '../faError';
@@ -31,27 +32,39 @@ export function NameScreen({
   const [imageB64, setImageB64] = useState<string | null>(null);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
 
-  const pick = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  const pick = () => {
+    Alert.alert('عکس پروفایل', undefined, [
+      { text: 'گالری', onPress: () => void pickWith(ImagePicker.launchImageLibraryAsync) },
+      { text: 'دوربین', onPress: () => void pickWith(ImagePicker.launchCameraAsync) },
+      { text: 'انصراف', style: 'cancel' },
+    ]);
+  };
+
+  const pickWith = async (
+    launch: typeof ImagePicker.launchImageLibraryAsync,
+  ): Promise<void> => {
+    const perm = launch === ImagePicker.launchCameraAsync
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('دسترسی', 'برای انتخاب عکس، دسترسی گالری را بدهید');
+      Alert.alert('دسترسی', 'برای انتخاب عکس، دسترسی را بدهید');
       return;
     }
-    const res = await ImagePicker.launchImageLibraryAsync({
+    const res = await launch({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
-      base64: true,
+      quality: 0.7,
     });
-    const asset = res.assets?.[0];
-    if (res.canceled || !asset?.base64) return;
-    if ((asset.fileSize ?? 0) > 900_000) {
-      Alert.alert('حجم زیاد', 'عکس بزرگ است — یک عکس کوچک‌تر انتخاب کنید');
-      return;
+    if (res.canceled || !res.assets[0]) return;
+    try {
+      // فشرده‌سازی محلی ۵۱۲px — سقف ۵۱۲KB آواتار و سقف JSON سرور
+      const b64 = await avatarBase64(res.assets[0].uri);
+      setImageB64(b64);
+      setPreviewUri(res.assets[0].uri);
+    } catch {
+      Alert.alert('عکس پروفایل', 'پردازش عکس ناموفق بود — عکس دیگری انتخاب کنید');
     }
-    setImageB64(asset.base64);
-    setPreviewUri(asset.uri);
   };
 
   const finish = async () => {
